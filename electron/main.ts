@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 
 process.env.DIST = path.join(__dirname, '../dist')
@@ -43,4 +44,34 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
 })
 
-app.whenReady().then(createWindow)
+function setupAutoUpdater() {
+  // only real installed builds have anything to update against — running
+  // via `npm run dev` / an unpacked build has no update feed
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Update ready',
+      message: `Boarding Ledger ${info.version} has been downloaded.`,
+      detail: 'Restart now to install it, or install it later the next time you quit.',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (response === 0) autoUpdater.quitAndInstall()
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-update error:', err)
+  })
+
+  autoUpdater.checkForUpdates()
+}
+
+app.whenReady().then(() => {
+  createWindow()
+  setupAutoUpdater()
+})
