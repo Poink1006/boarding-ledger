@@ -1,0 +1,475 @@
+import { useCallback, useEffect, useState } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import { useToast } from '../contexts/ToastContext'
+import { Modal } from '../components/Modal'
+import { effectiveCapacity, effectiveRate, naturalSort } from '../lib/rooms'
+import { fmtMoney } from '../lib/format'
+import { occupiesBed, TENANT_STATUS_LABEL, TENANT_STATUS_BADGE } from '../lib/tenantStatus'
+import type { Database, RoomMode } from '../lib/database.types'
+
+type Apartment = Database['public']['Tables']['apartments']['Row']
+type Room = Database['public']['Tables']['rooms']['Row']
+type Tenant = Database['public']['Tables']['tenants']['Row']
+type AppSettings = Database['public']['Tables']['app_settings']['Row']
+type RoomPriceGroup = Database['public']['Tables']['room_price_groups']['Row']
+
+type ApartmentModalState = { mode: 'add' } | { mode: 'edit'; apartment: Apartment } | null
+type RoomModalState = { mode: 'add'; apartmentId: string } | { mode: 'edit'; room: Room } | null
+
+export function Rooms() {
+  const { isAdmin } = useAuth()
+  const { showToast } = useToast()
+
+  const [apartments, setApartments] = useState<Apartment[]>([])
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [settings, setSettings] = useState<AppSettings | null>(null)
+  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>([])
+  const [occupancy, setOccupancy] = useState<Record<string, number>>({})
+  const [loading, setLoading] = useState(true)
+
+  const [apartmentModal, setApartmentModal] = useState<ApartmentModalState>(null)
+  const [roomModal, setRoomModal] = useState<RoomModalState>(null)
+  const [tenantsModalRoom, setTenantsModalRoom] = useState<Room | null>(null)
+
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    const [apartmentsRes, roomsRes, settingsRes, tenantsRes, priceGroupsRes] = await Promise.all([
+      supabase.from('apartments').select('*'),
+      supabase.from('rooms').select('*'),
+      supabase.from('app_settings').select('*').single(),
+      supabase.from('tenants').select('*'),
+      supabase.from('room_price_groups').select('*'),
+    ])
+    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+    if (roomsRes.error) showToast(roomsRes.error.message)
+    if (settingsRes.error) showToast(settingsRes.error.message)
+    if (tenantsRes.error) showToast(tenantsRes.error.message)
+    if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
+
+    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
+    setRooms([...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)))
+    setSettings(settingsRes.data ?? null)
+    setPriceGroups(priceGroupsRes.data ?? [])
+
+    const activeTenants = (tenantsRes.data ?? []).filter((t) => occupiesBed(t.status))
+    setTenants(activeTenants)
+    const counts: Record<string, number> = {}
+    for (const t of activeTenants) {
+      if (t.room_id) counts[t.room_id] = (counts[t.room_id] ?? 0) + 1
+    }
+    setOccupancy(counts)
+    setLoading(false)
+  }, [showToast])
+
+  useEffect(() => {
+    loadAll()
+  }, [loadAll])
+
+  async function deleteApartment(apartment: Apartment) {
+    const apartmentRooms = rooms.filter((r) => r.apartment_id === apartment.id)
+    const hasTenants = apartmentRooms.some((r) => (occupancy[r.id] ?? 0) > 0)
+    const warn = hasTenants
+      ? ' This apartment has tenants assigned — deleting it will unassign them from their rooms.'
+      : ''
+    if (!window.confirm(`Delete ${apartment.name} and its ${apartmentRooms.length} room(s)?${warn}`)) return
+    const { error } = await supabase.from('apartments').delete().eq('id', apartment.id)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast('Apartment deleted.')
+    loadAll()
+  }
+
+  async function deleteRoom(room: Room) {
+    const occ = occupancy[room.id] ?? 0
+    const warn = occ > 0 ? ` ${occ} tenant(s) will be unassigned.` : ''
+    if (!window.confirm(`Delete room "${room.label}"?${warn}`)) return
+    const { error } = await supabase.from('rooms').delete().eq('id', room.id)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast('Room deleted.')
+    loadAll()
+  }
+
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <h3>Loading rooms…</h3>
+      </div>
+    )
+  }
+
+  const totalCapacity = rooms.reduce((s, r) => s + effectiveCapacity(r), 0)
+  const totalOccupied = Object.values(occupancy).reduce((s, n) => s + n, 0)
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h2>Units &amp; Rooms</h2>
+          <div className="page-sub">
+            {apartments.length} apartment{apartments.length === 1 ? '' : 's'} · {rooms.length} room
+            {rooms.length === 1 ? '' : 's'} · {totalOccupied}/{totalCapacity} beds occupied
+          </div>
+        </div>
+        {isAdmin && (
+          <button className="btn btn-primary" onClick={() => setApartmentModal({ mode: 'add' })}>
+            + Add apartment
+          </button>
+        )}
+      </div>
+
+      {apartments.length === 0 ? (
+        <div className="empty-state">
+          <h3>No apartments yet</h3>
+          <p>
+            {isAdmin
+              ? 'Add your first apartment to start laying out rooms.'
+              : 'Ask an admin to set up apartments and rooms.'}
+          </p>
+        </div>
+      ) : (
+        <div className="units-grid">
+          {apartments.map((apartment) => {
+            const apartmentRooms = rooms.filter((r) => r.apartment_id === apartment.id)
+            const cap = apartmentRooms.reduce((s, r) => s + effectiveCapacity(r), 0)
+            const occ = apartmentRooms.reduce((s, r) => s + (occupancy[r.id] ?? 0), 0)
+            return (
+              <div className="unit-card" key={apartment.id}>
+                <div className="unit-card-head">
+                  <h4>{apartment.name}</h4>
+                  <span className="unit-occ">
+                    {occ}/{cap} pax
+                  </span>
+                </div>
+                <div className="room-list">
+                  {apartmentRooms.map((room) => {
+                    const effCap = effectiveCapacity(room)
+                    const rate = effectiveRate(room, settings, priceGroups)
+                    const roomOcc = occupancy[room.id] ?? 0
+                    const dots = Array.from({ length: effCap }, (_, i) => i < roomOcc)
+                    const modeLabel = room.mode === 'private' ? 'Private' : 'Shared'
+                    return (
+                      <div
+                        className="room-row"
+                        key={room.id}
+                        onClick={() =>
+                          isAdmin ? setRoomModal({ mode: 'edit', room }) : setTenantsModalRoom(room)
+                        }
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div>
+                          <span className="room-id">{room.label}</span>
+                          <span className="room-type">
+                            {modeLabel} · {fmtMoney(rate)}/pax
+                          </span>
+                        </div>
+                        <div className="bed-dots">
+                          {dots.map((filled, i) => (
+                            <span key={i} className={`dot ${filled ? 'filled' : 'empty'}`} />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {apartmentRooms.length === 0 && <div className="hint">No rooms yet.</div>}
+                </div>
+                {isAdmin && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setRoomModal({ mode: 'add', apartmentId: apartment.id })}
+                    >
+                      + Room
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setApartmentModal({ mode: 'edit', apartment })}
+                    >
+                      Rename
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteApartment(apartment)}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {apartmentModal && (
+        <ApartmentModal
+          initial={apartmentModal.mode === 'edit' ? apartmentModal.apartment : null}
+          onClose={() => setApartmentModal(null)}
+          onSaved={() => {
+            setApartmentModal(null)
+            loadAll()
+          }}
+        />
+      )}
+
+      {roomModal && (
+        <RoomModal
+          initial={roomModal.mode === 'edit' ? roomModal.room : null}
+          apartmentId={roomModal.mode === 'add' ? roomModal.apartmentId : roomModal.room.apartment_id}
+          settings={settings}
+          priceGroups={priceGroups}
+          occupancy={occupancy}
+          onClose={() => setRoomModal(null)}
+          onSaved={() => {
+            setRoomModal(null)
+            loadAll()
+          }}
+          onDelete={
+            roomModal.mode === 'edit'
+              ? () => {
+                  const room = roomModal.room
+                  setRoomModal(null)
+                  deleteRoom(room)
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {tenantsModalRoom && (
+        <Modal title={tenantsModalRoom.label} onClose={() => setTenantsModalRoom(null)}>
+          <div className="status-legend">
+            {(Object.keys(TENANT_STATUS_LABEL) as (keyof typeof TENANT_STATUS_LABEL)[])
+              .filter((s) => s !== 'inactive')
+              .map((status) => (
+                <span className="legend-item" key={status}>
+                  <span className={`badge ${TENANT_STATUS_BADGE[status]}`}>{TENANT_STATUS_LABEL[status]}</span>
+                </span>
+              ))}
+          </div>
+          {tenants.filter((t) => t.room_id === tenantsModalRoom.id).length === 0 ? (
+            <div className="hint">No tenants currently assigned to this room.</div>
+          ) : (
+            <div className="room-tenant-list">
+              {tenants
+                .filter((t) => t.room_id === tenantsModalRoom.id)
+                .map((t) => (
+                  <div className="room-tenant-row" key={t.id}>
+                    <span>
+                      {t.first_name} {t.last_name}
+                    </span>
+                    <span className={`badge ${TENANT_STATUS_BADGE[t.status]}`}>{TENANT_STATUS_LABEL[t.status]}</span>
+                  </div>
+                ))}
+            </div>
+          )}
+        </Modal>
+      )}
+    </>
+  )
+}
+
+function ApartmentModal({
+  initial,
+  onClose,
+  onSaved,
+}: {
+  initial: Apartment | null
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const { showToast } = useToast()
+  const [name, setName] = useState(initial?.name ?? '')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!name.trim()) {
+      showToast('Apartment name is required.')
+      return
+    }
+    setSaving(true)
+    const { error } = initial
+      ? await supabase.from('apartments').update({ name: name.trim() }).eq('id', initial.id)
+      : await supabase.from('apartments').insert({ name: name.trim() })
+    setSaving(false)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast(initial ? 'Apartment updated.' : 'Apartment added.')
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title={initial ? 'Rename apartment' : 'Add apartment'}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="form-group">
+        <label>Apartment name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="e.g. Apartment 1" />
+      </div>
+    </Modal>
+  )
+}
+
+function RoomModal({
+  initial,
+  apartmentId,
+  settings,
+  priceGroups,
+  occupancy,
+  onClose,
+  onSaved,
+  onDelete,
+}: {
+  initial: Room | null
+  apartmentId: string
+  settings: AppSettings | null
+  priceGroups: RoomPriceGroup[]
+  occupancy: Record<string, number>
+  onClose: () => void
+  onSaved: () => void
+  onDelete?: () => void
+}) {
+  const { showToast } = useToast()
+  const [label, setLabel] = useState(initial?.label ?? '')
+  const [capacity, setCapacity] = useState(String(initial?.capacity ?? 4))
+  const [mode, setMode] = useState<RoomMode>(initial?.mode ?? 'shared')
+  const [privateCapacity, setPrivateCapacity] = useState(
+    initial?.private_capacity != null ? String(initial.private_capacity) : '',
+  )
+  const [customRate, setCustomRate] = useState(
+    initial?.custom_rate_per_pax != null ? String(initial.custom_rate_per_pax) : '',
+  )
+  const [saving, setSaving] = useState(false)
+
+  const priceGroup = initial?.price_group_id ? priceGroups.find((g) => g.id === initial.price_group_id) : null
+  const fallbackRate = priceGroup
+    ? mode === 'private'
+      ? priceGroup.private_rate_per_pax
+      : priceGroup.shared_rate_per_pax
+    : mode === 'private'
+      ? settings?.default_private_rate_per_pax
+      : settings?.default_shared_rate_per_pax
+  const currentOccupancy = initial ? occupancy[initial.id] ?? 0 : 0
+
+  async function handleSave() {
+    const cap = Number(capacity)
+    if (!label.trim() || !cap || cap < 1) {
+      showToast('Room label and a valid capacity are required.')
+      return
+    }
+    const privCap = privateCapacity.trim() ? Number(privateCapacity) : null
+    if (mode === 'private' && privCap != null && privCap > cap) {
+      showToast('Private capacity cannot exceed normal capacity.')
+      return
+    }
+    const effCap = mode === 'private' ? privCap ?? cap : cap
+    if (currentOccupancy > effCap) {
+      showToast(`This room has ${currentOccupancy} tenant(s) assigned — move them out first or raise capacity.`)
+      return
+    }
+
+    const payload = {
+      apartment_id: apartmentId,
+      label: label.trim(),
+      capacity: cap,
+      mode,
+      private_capacity: privCap,
+      custom_rate_per_pax: customRate.trim() ? Number(customRate) : null,
+    }
+    setSaving(true)
+    const { error } = initial
+      ? await supabase.from('rooms').update(payload).eq('id', initial.id)
+      : await supabase.from('rooms').insert(payload)
+    setSaving(false)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast(initial ? 'Room updated.' : 'Room added.')
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title={initial ? `Edit ${initial.label}` : 'Add room'}
+      onClose={onClose}
+      footer={
+        <>
+          {onDelete && (
+            <button className="btn btn-danger" onClick={onDelete} style={{ marginRight: 'auto' }}>
+              Delete
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </>
+      }
+    >
+      <div className="form-row">
+        <div className="form-group">
+          <label>Room label</label>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Room 1" autoFocus />
+        </div>
+        <div className="form-group">
+          <label>Capacity (pax)</label>
+          <input type="number" min={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Mode</label>
+        <select value={mode} onChange={(e) => setMode(e.target.value as RoomMode)}>
+          <option value="shared">Shared</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      {mode === 'private' && (
+        <div className="form-group">
+          <label>Private capacity (pax)</label>
+          <input
+            type="number"
+            min={1}
+            value={privateCapacity}
+            onChange={(e) => setPrivateCapacity(e.target.value)}
+            placeholder={`Default: same as capacity (${capacity})`}
+          />
+          <div className="hint">How many people this room actually holds while in Private mode.</div>
+        </div>
+      )}
+      <div className="form-group">
+        <label>Custom rate override (₱/pax)</label>
+        <input
+          type="number"
+          min={0}
+          value={customRate}
+          onChange={(e) => setCustomRate(e.target.value)}
+          placeholder={fallbackRate != null ? `${priceGroup ? priceGroup.name : 'Default'}: ₱${fallbackRate.toLocaleString()}/pax` : ''}
+        />
+        <div className="hint">
+          {priceGroup
+            ? `This room is in the "${priceGroup.name}" pricing group. Leave blank to follow that group's ${mode} rate, or set a one-off override here. Manage group membership from Settings.`
+            : `Leave blank to use the ${mode} default rate set in Settings.`}
+        </div>
+      </div>
+    </Modal>
+  )
+}

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "mcp__Claude_Browser__preview_start"
+    ]
+  }
+}
