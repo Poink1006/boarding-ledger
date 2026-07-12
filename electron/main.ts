@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 
@@ -46,23 +46,23 @@ app.on('activate', () => {
 })
 
 function setupAutoUpdater() {
+  // let the renderer trigger the install-and-restart from its in-app banner
+  ipcMain.on('update:restart', () => autoUpdater.quitAndInstall())
+
   // only real installed builds have anything to update against — running
   // via `npm run dev` / an unpacked build has no update feed
   if (!app.isPackaged) return
 
   autoUpdater.autoDownload = true
 
-  autoUpdater.on('update-downloaded', async (info) => {
-    const { response } = await dialog.showMessageBox({
-      type: 'info',
-      title: 'Update ready',
-      message: `Victoria Residence ${info.version} has been downloaded.`,
-      detail: 'Restart now to install it, or install it later the next time you quit.',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-    })
-    if (response === 0) autoUpdater.quitAndInstall()
+  // notify the renderer as soon as a newer version is found, so it can show
+  // "downloading…", then again once it's ready to install
+  autoUpdater.on('update-available', (info) => {
+    win?.webContents.send('update:available', { version: info.version })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    win?.webContents.send('update:downloaded', { version: info.version })
   })
 
   autoUpdater.on('error', (err) => {

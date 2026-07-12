@@ -10,7 +10,10 @@ interface ImportMeta {
 }
 
 interface Window {
-  electronAPI: {
+  electronAPI?: {
     platform: NodeJS.Platform
+    onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
+    onUpdateDownloaded: (cb: (info: { version: string }) => void) => () => void
+    restartToUpdate: () => void
   }
 }

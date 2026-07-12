@@ -3,6 +3,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
+import { UpdateBanner } from './components/UpdateBanner'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Rooms } from './pages/Rooms'
@@ -16,6 +17,7 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
+        <UpdateBanner />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
