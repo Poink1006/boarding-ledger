@@ -385,9 +385,6 @@ function RoomModal({
   const [privateCapacity, setPrivateCapacity] = useState(
     initial?.private_capacity != null ? String(initial.private_capacity) : '',
   )
-  const [customRate, setCustomRate] = useState(
-    initial?.custom_rate_per_pax != null ? String(initial.custom_rate_per_pax) : '',
-  )
   const [saving, setSaving] = useState(false)
 
   const priceGroup = initial?.price_group_id ? priceGroups.find((g) => g.id === initial.price_group_id) : null
@@ -423,7 +420,6 @@ function RoomModal({
       capacity: cap,
       mode,
       private_capacity: privCap,
-      custom_rate_per_pax: customRate.trim() ? Number(customRate) : null,
     }
     setSaving(true)
     const { error } = initial
@@ -489,18 +485,12 @@ function RoomModal({
         </div>
       )}
       <div className="form-group">
-        <label>Custom rate override (₱/pax)</label>
-        <input
-          type="number"
-          min={0}
-          value={customRate}
-          onChange={(e) => setCustomRate(e.target.value)}
-          placeholder={fallbackRate != null ? `${priceGroup ? priceGroup.name : 'Default'}: ₱${fallbackRate.toLocaleString()}/pax` : ''}
-        />
+        <label>Rate (₱/pax)</label>
+        <input value={fallbackRate != null ? `₱${fallbackRate.toLocaleString()}/pax` : '—'} disabled />
         <div className="hint">
           {priceGroup
-            ? `This room is in the "${priceGroup.name}" pricing group. Leave blank to follow that group's ${mode} rate, or set a one-off override here. Manage group membership from Settings.`
-            : `Leave blank to use the ${mode} default rate set in Settings.`}
+            ? `From the "${priceGroup.name}" pricing group's ${mode} rate. Manage groups in Settings.`
+            : `The ${mode} default rate set in Settings. To give one tenant a special rate, use their edit form on the Tenants page.`}
         </div>
       </div>
     </Modal>

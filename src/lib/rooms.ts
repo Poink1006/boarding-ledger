@@ -8,9 +8,10 @@ export function effectiveCapacity(room: Room) {
   return room.mode === 'private' ? room.private_capacity ?? room.capacity : room.capacity
 }
 
-// Priority: per-room custom override > price group > global default
+// A room's rate: price group > global default. Per-tenant custom overrides
+// (tenants.custom_rate_per_pax) are applied on top of this at assignment time,
+// see the Tenants page — rooms themselves no longer carry an override.
 export function effectiveRate(room: Room, settings: AppSettings | null, priceGroups: RoomPriceGroup[] = []) {
-  if (room.custom_rate_per_pax != null) return room.custom_rate_per_pax
   if (room.price_group_id) {
     const group = priceGroups.find((g) => g.id === room.price_group_id)
     if (group) return room.mode === 'private' ? group.private_rate_per_pax : group.shared_rate_per_pax

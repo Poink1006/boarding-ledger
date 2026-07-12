@@ -169,6 +169,7 @@ export interface Database {
           room_id: string | null
           bed_index: number | null
           monthly_rate: number
+          custom_rate_per_pax: number | null
           date_applied: string
           move_in_date: string | null
           duration_months: number | null
@@ -202,6 +203,7 @@ export interface Database {
           room_id?: string | null
           bed_index?: number | null
           monthly_rate?: number
+          custom_rate_per_pax?: number | null
           date_applied?: string
           move_in_date?: string | null
           duration_months?: number | null
@@ -235,6 +237,7 @@ export interface Database {
           room_id?: string | null
           bed_index?: number | null
           monthly_rate?: number
+          custom_rate_per_pax?: number | null
           date_applied?: string
           move_in_date?: string | null
           duration_months?: number | null

@@ -769,9 +769,15 @@ function MoveModal({
       ? tenant.bed_index
       : firstVacantBedIndex(effCap, occupied)
     : null
-  // rate always follows the newly selected room — this move is the explicit
-  // re-sync point after grandfathering (see TenantModal)
-  const newMonthlyRate = selectedRoom ? effectiveRate(selectedRoom, settings, priceGroups) : tenant.monthly_rate
+  // a per-tenant custom rate follows the tenant across the move; otherwise the
+  // rate re-syncs to the new room (this move is the explicit re-sync point
+  // after grandfathering — see TenantModal)
+  const newMonthlyRate =
+    tenant.custom_rate_per_pax != null
+      ? tenant.custom_rate_per_pax
+      : selectedRoom
+        ? effectiveRate(selectedRoom, settings, priceGroups)
+        : tenant.monthly_rate
 
   async function handleMove() {
     if (!roomId || !selectedRoom) {
@@ -913,6 +919,10 @@ function TenantModal({
   const [depositAmount, setDepositAmount] = useState(
     initial?.deposit_amount != null ? String(initial.deposit_amount) : '',
   )
+  // per-tenant custom rate override (admin only). Blank = follow the room's rate.
+  const [customRate, setCustomRate] = useState(
+    initial?.custom_rate_per_pax != null ? String(initial.custom_rate_per_pax) : '',
+  )
   const [saving, setSaving] = useState(false)
 
   const apartmentById = useMemo(() => new Map(apartments.map((a) => [a.id, a])), [apartments])
@@ -924,10 +934,22 @@ function TenantModal({
     initial && initial.room_id === roomId ? initial.bed_index : selectedRoom ? firstVacantBedIndex(effCap, occupied) : null
   const vacantCount = effCap - occupied.size
 
-  // grandfathered: an existing tenant's rate stays whatever it was set to at
-  // move-in/last move, even if the room's price changes later. Only a new
-  // tenant (or an explicit Move) re-syncs to the room's current rate.
-  const monthlyRate = initial ? initial.monthly_rate : selectedRoom ? effectiveRate(selectedRoom, settings, priceGroups) : 0
+  // the room's standard rate (pricing group or global default)
+  const roomBaseRate = selectedRoom ? effectiveRate(selectedRoom, settings, priceGroups) : 0
+  const overrideNum = customRate.trim() ? Number(customRate) : null
+  // Effective monthly rate:
+  //  - override set → use it
+  //  - new tenant, no override → follow the room's rate
+  //  - existing tenant, no override → keep their grandfathered snapshot, unless
+  //    they previously HAD an override that's now cleared → revert to room rate
+  const monthlyRate =
+    overrideNum != null
+      ? overrideNum
+      : initial
+        ? initial.custom_rate_per_pax != null
+          ? roomBaseRate
+          : initial.monthly_rate
+        : roomBaseRate
 
   function handleRoomChange(newRoomId: string) {
     setRoomId(newRoomId)
@@ -969,7 +991,10 @@ function TenantModal({
       year_level: yearLevel.trim() || null,
       room_id: roomId,
       bed_index: bedIndex,
-      monthly_rate: monthlyRate,
+      // rate + override are pricing decisions — only admins may change them.
+      // for a non-admin editing an existing tenant, keep the saved values.
+      monthly_rate: !isAdmin && initial ? initial.monthly_rate : monthlyRate,
+      custom_rate_per_pax: !isAdmin && initial ? initial.custom_rate_per_pax : overrideNum,
       duration_months: Number(durationMonths) || 1,
       move_in_date: moveInDate || null,
       deposit_amount: fieldsLocked ? initial!.deposit_amount : Number(depositAmount) || 0,
@@ -981,11 +1006,22 @@ function TenantModal({
       // in/out or activating them are separate explicit actions, not a
       // side effect of editing their details
       const { error } = await supabase.from('tenants').update(payload).eq('id', initial.id)
-      setSaving(false)
       if (error) {
+        setSaving(false)
         showToast(error.message)
         return
       }
+      // if an admin changed the rate, date-stamp it so past cycles keep the old
+      // rate and only future cycles bill at the new one (point-in-time history)
+      if (payload.monthly_rate !== initial.monthly_rate) {
+        const { error: historyError } = await supabase.from('tenant_rate_changes').insert({
+          tenant_id: initial.id,
+          monthly_rate: payload.monthly_rate,
+          effective_date: todayStr(),
+        })
+        if (historyError) showToast(historyError.message)
+      }
+      setSaving(false)
       showToast('Tenant updated.')
       onSaved()
     } else {
@@ -1159,9 +1195,11 @@ function TenantModal({
           <label>Monthly rate (₱)</label>
           <input value={fmtMoney(monthlyRate)} disabled />
           <div className="hint">
-            {initial
-              ? 'Locked to the rate set when this tenant was assigned.'
-              : "Follows the selected room's price automatically."}
+            {overrideNum != null
+              ? 'Custom rate set for this tenant.'
+              : initial && initial.custom_rate_per_pax == null
+                ? 'Locked to the rate set when this tenant was assigned.'
+                : "Follows the selected room's rate."}
           </div>
         </div>
         <div className="form-group">
@@ -1169,6 +1207,21 @@ function TenantModal({
           <input type="number" min={1} value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} />
         </div>
       </div>
+      {isAdmin && (
+        <div className="form-group" style={{ maxWidth: 260 }}>
+          <label>Custom rate override (₱/mo)</label>
+          <input
+            type="number"
+            min={0}
+            value={customRate}
+            onChange={(e) => setCustomRate(e.target.value)}
+            placeholder={`Room rate: ${fmtMoney(roomBaseRate)}`}
+          />
+          <div className="hint">
+            Optional. A special monthly rate just for this tenant. Leave blank to follow the room's rate.
+          </div>
+        </div>
+      )}
       <div className="form-group">
         <label>Move-in date</label>
         <input type="date" value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />

@@ -158,7 +158,7 @@ create table public.rooms (
   capacity int not null check (capacity > 0),    -- normal (shared) capacity
   private_capacity int,                          -- effective capacity when mode='private'
   mode text not null default 'shared' check (mode in ('shared', 'private')),
-  custom_rate_per_pax numeric(10,2),             -- highest-priority override, null = use price group or default
+  custom_rate_per_pax numeric(10,2),             -- DEPRECATED: overrides now live on the tenant (see tenants.custom_rate_per_pax). Kept for backward-compat; unused by the app.
   price_group_id uuid references public.room_price_groups(id) on delete set null,
   created_at timestamptz not null default now(),
   constraint rooms_private_capacity_valid
@@ -207,7 +207,8 @@ create table public.tenants (
   bed_index int,
 
   -- booking
-  monthly_rate numeric(10,2) not null default 0,
+  monthly_rate numeric(10,2) not null default 0,     -- effective snapshot: custom_rate_per_pax if set, else the room's group/default rate at assignment
+  custom_rate_per_pax numeric(10,2),                 -- per-tenant override; null = follow the room's group/default rate
   date_applied date not null default current_date,
   move_in_date date,
   duration_months int check (duration_months > 0),

@@ -12,6 +12,7 @@ import type { Database } from '../lib/database.types'
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
 type Apartment = Database['public']['Tables']['apartments']['Row']
 type Room = Database['public']['Tables']['rooms']['Row']
+type Tenant = Database['public']['Tables']['tenants']['Row']
 type Profile = Database['public']['Tables']['profiles']['Row']
 type RoomPriceGroup = Database['public']['Tables']['room_price_groups']['Row']
 
@@ -30,6 +31,7 @@ interface SettingsData {
   settings: AppSettings | null
   apartments: Apartment[]
   rooms: Room[]
+  tenants: Tenant[]
   priceGroups: RoomPriceGroup[]
   updatedByProfile: Profile | null
 }
@@ -43,6 +45,7 @@ export function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
   const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
   const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
   const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>(cached?.priceGroups ?? [])
   const [updatedByProfile, setUpdatedByProfile] = useState<Profile | null>(cached?.updatedByProfile ?? null)
   const [loading, setLoading] = useState(!cached)
@@ -63,15 +66,17 @@ export function Settings() {
   const loadAll = useCallback(
     async (silent = false) => {
       if (!silent) setLoading(true)
-      const [settingsRes, apartmentsRes, roomsRes, priceGroupsRes] = await Promise.all([
+      const [settingsRes, apartmentsRes, roomsRes, tenantsRes, priceGroupsRes] = await Promise.all([
         supabase.from('app_settings').select('*').single(),
         supabase.from('apartments').select('*'),
         supabase.from('rooms').select('*'),
+        supabase.from('tenants').select('*'),
         supabase.from('room_price_groups').select('*'),
       ])
       if (settingsRes.error) showToast(settingsRes.error.message)
       if (apartmentsRes.error) showToast(apartmentsRes.error.message)
       if (roomsRes.error) showToast(roomsRes.error.message)
+      if (tenantsRes.error) showToast(tenantsRes.error.message)
       if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
 
       let updatedBy: Profile | null = null
@@ -84,6 +89,7 @@ export function Settings() {
         settings: settingsRes.data ?? null,
         apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
         rooms: [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)),
+        tenants: tenantsRes.data ?? [],
         priceGroups: [...(priceGroupsRes.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
         updatedByProfile: updatedBy,
       }
@@ -95,6 +101,7 @@ export function Settings() {
       setWaterAllowance(data.settings ? String(data.settings.water_allowance_per_tenant) : '')
       setApartments(data.apartments)
       setRooms(data.rooms)
+      setTenants(data.tenants)
       setPriceGroups(data.priceGroups)
       setUpdatedByProfile(data.updatedByProfile)
       setLoading(false)
@@ -195,7 +202,10 @@ export function Settings() {
     )
   }
 
-  const overrides = rooms.filter((r) => r.custom_rate_per_pax != null)
+  // tenants with a per-tenant custom rate override (excluding moved-out ones)
+  const overrides = tenants
+    .filter((t) => t.custom_rate_per_pax != null && t.status !== 'inactive')
+    .sort((a, b) => naturalSort.compare(a.tenant_number, b.tenant_number))
   const dirty = settings
     ? Number(sharedRate) !== settings.default_shared_rate_per_pax || Number(privateRate) !== settings.default_private_rate_per_pax
     : false
@@ -209,7 +219,7 @@ export function Settings() {
       <div className="page-head">
         <div>
           <h2>Settings</h2>
-          <div className="page-sub">Admin-only — pricing defaults and per-room overrides</div>
+          <div className="page-sub">Admin-only — pricing defaults and per-tenant overrides</div>
         </div>
       </div>
 
@@ -230,8 +240,8 @@ export function Settings() {
         <>
           <div className="table-wrap" style={{ padding: '20px 24px', maxWidth: 520 }}>
             <p className="hint" style={{ marginBottom: 16 }}>
-              These are the ₱-per-pax rates used for any room left in Shared or Private mode without a
-              custom override. Changing them updates every room using the default immediately.
+              These are the ₱-per-pax rates used for any room in Shared or Private mode that isn't in a
+              pricing group. Changing them updates every room using the default immediately.
             </p>
             <div className="form-row">
               <div className="form-group">
@@ -269,7 +279,7 @@ export function Settings() {
           <div className="table-wrap" style={{ marginBottom: 28 }}>
             <p className="hint" style={{ padding: '16px 24px 0' }}>
               Apply one shared/private rate pair to many rooms at once — e.g. "Apt 1-6 · Rooms A/B".
-              Rooms with their own custom rate override still take priority over a group.
+              A tenant can still be given their own custom rate on the Tenants page.
             </p>
             {priceGroups.length === 0 ? (
               <div className="empty-state">
@@ -357,27 +367,29 @@ export function Settings() {
           {overrides.length === 0 ? (
             <div className="empty-state">
               <h3>No overrides set</h3>
-              <p>Every room currently uses the default shared/private rate above.</p>
+              <p>Every tenant currently pays their room's standard rate.</p>
             </div>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>Apartment</th>
+                  <th>Tenant No.</th>
+                  <th>Tenant</th>
                   <th>Room</th>
-                  <th>Mode</th>
                   <th>Custom Rate</th>
                 </tr>
               </thead>
               <tbody>
-                {overrides.map((r) => {
-                  const apartment = apartments.find((a) => a.id === r.apartment_id)
+                {overrides.map((t) => {
+                  const room = rooms.find((r) => r.id === t.room_id)
                   return (
-                    <tr key={r.id}>
-                      <td>{apartment?.name ?? '—'}</td>
-                      <td className="mono">{r.label}</td>
-                      <td>{r.mode === 'private' ? 'Private' : 'Shared'}</td>
-                      <td>{fmtMoney(r.custom_rate_per_pax ?? 0)}/pax</td>
+                    <tr key={t.id}>
+                      <td className="mono">{t.tenant_number}</td>
+                      <td className="name-cell">
+                        {t.first_name} {t.last_name}
+                      </td>
+                      <td className="mono">{room?.label ?? '—'}</td>
+                      <td>{fmtMoney(t.custom_rate_per_pax ?? 0)}/mo</td>
                     </tr>
                   )
                 })}
@@ -385,7 +397,7 @@ export function Settings() {
             </table>
           )}
           <div className="hint" style={{ padding: '12px 24px' }}>
-            Edit or clear an override from the room's edit form on the Units &amp; Rooms page.
+            Set or clear a tenant's custom rate from their edit form on the Tenants page.
           </div>
         </div>
       )}
