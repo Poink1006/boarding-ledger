@@ -26,26 +26,24 @@ export function Login() {
       style={{
         minHeight: '100vh',
         display: 'flex',
-        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 20,
         background: 'var(--paper)',
       }}
     >
-      <div style={{ textAlign: 'center' }}>
-        <img src={logo} alt="" style={{ width: 88, height: 88, marginBottom: 8 }} />
-        <div className="login-title" style={{ fontSize: 24 }}>
-          Victoria Residence
-        </div>
-      </div>
       <form
         onSubmit={handleSubmit}
         className="table-wrap"
         style={{ width: 360, padding: '28px 28px 24px' }}
       >
-        <div className="page-sub" style={{ marginBottom: 20 }}>
-          Sign in to manage apartments, tenants, and payments.
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <img src={logo} alt="" style={{ width: 76, height: 76, marginBottom: 8 }} />
+          <div className="login-title" style={{ fontSize: 22 }}>
+            Victoria Residence
+          </div>
+          <div className="page-sub" style={{ marginTop: 4 }}>
+            Sign in to manage apartments, tenants, and payments.
+          </div>
         </div>
 
         <div className="form-group">
