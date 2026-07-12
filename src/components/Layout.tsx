@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import logo from '../assets/logo.png'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '▤', end: true },
@@ -16,7 +17,7 @@ export function Layout() {
     <div id="app">
       <div className="sidebar">
         <div className="brand">
-          <img src="/logo.png" alt="" className="brand-logo" />
+          <img src={logo} alt="" className="brand-logo" />
           Victoria Residence
         </div>
         <div className="brand-sub">8 Units · 34 Rooms</div>
