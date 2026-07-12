@@ -43,7 +43,8 @@
     "publish": {
       "provider": "github",
       "owner": "Poink1006",
-      "repo": "boarding-ledger"
+      "repo": "boarding-ledger",
+      "releaseType": "release"
     },
     "mac": {
       "target": "dmg",
