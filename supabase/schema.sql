@@ -1,5 +1,5 @@
 -- ============================================================================
--- Boarding Ledger — Supabase schema + RLS
+-- Victoria Residence — Supabase schema + RLS
 -- Roles: 'admin' (full control) and 'user' (front-desk staff)
 -- ============================================================================
 

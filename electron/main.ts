@@ -18,8 +18,9 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     fullscreen: true,
-    title: 'Boarding Ledger',
+    title: 'Victoria Residence',
     backgroundColor: '#F5F1E8',
+    icon: path.join(process.env.VITE_PUBLIC!, 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -55,7 +56,7 @@ function setupAutoUpdater() {
     const { response } = await dialog.showMessageBox({
       type: 'info',
       title: 'Update ready',
-      message: `Boarding Ledger ${info.version} has been downloaded.`,
+      message: `Victoria Residence ${info.version} has been downloaded.`,
       detail: 'Restart now to install it, or install it later the next time you quit.',
       buttons: ['Restart now', 'Later'],
       defaultId: 0,

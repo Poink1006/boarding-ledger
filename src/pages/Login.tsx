@@ -35,7 +35,8 @@ export function Login() {
         className="table-wrap"
         style={{ width: 360, padding: '28px 28px 24px' }}
       >
-        <div className="login-title">Boarding Ledger</div>
+        <img src="/logo.png" alt="" style={{ width: 48, height: 48, marginBottom: 12 }} />
+        <div className="login-title">Victoria Residence</div>
         <div className="page-sub" style={{ marginBottom: 20 }}>
           Sign in to manage apartments, tenants, and payments.
         </div>

@@ -15,7 +15,10 @@ export function Layout() {
   return (
     <div id="app">
       <div className="sidebar">
-        <div className="brand">Boarding Ledger</div>
+        <div className="brand">
+          <img src="/logo.png" alt="" className="brand-logo" />
+          Victoria Residence
+        </div>
         <div className="brand-sub">8 Units · 34 Rooms</div>
 
         {NAV_ITEMS.map((item) => (
