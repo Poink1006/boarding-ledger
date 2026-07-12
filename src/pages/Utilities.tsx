@@ -4,6 +4,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtRate, dateToMonthInput, monthInputToDate, todayStr } from '../lib/format'
+import { SkeletonStatGrid, SkeletonTable } from '../components/Skeleton'
+import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database, UtilityType } from '../lib/database.types'
 
 type Apartment = Database['public']['Tables']['apartments']['Row']
@@ -22,39 +24,61 @@ function billRate(bill: UtilityBill) {
   return bill.usage > 0 ? bill.total_cost / bill.usage : 0
 }
 
+const CACHE_KEY = 'utilities'
+interface UtilitiesData {
+  apartments: Apartment[]
+  bills: UtilityBill[]
+}
+
 export function Utilities() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
 
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [bills, setBills] = useState<UtilityBill[]>([])
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<UtilitiesData>(CACHE_KEY)
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [bills, setBills] = useState<UtilityBill[]>(cached?.bills ?? [])
+  const [loading, setLoading] = useState(!cached)
   const [month, setMonth] = useState(dateToMonthInput(todayStr()))
   const [activeTab, setActiveTab] = useState<UtilityType>('electricity')
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [apartmentsRes, billsRes] = await Promise.all([
-      supabase.from('apartments').select('*'),
-      supabase.from('utility_bills').select('*'),
-    ])
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (billsRes.error) showToast(billsRes.error.message)
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      const [apartmentsRes, billsRes] = await Promise.all([
+        supabase.from('apartments').select('*'),
+        supabase.from('utility_bills').select('*'),
+      ])
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (billsRes.error) showToast(billsRes.error.message)
 
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setBills(billsRes.data ?? [])
-    setLoading(false)
-  }, [showToast])
+      const data: UtilitiesData = {
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        bills: billsRes.data ?? [],
+      }
+      setCached(CACHE_KEY, data)
+      setApartments(data.apartments)
+      setBills(data.bills)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading utility bills…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Utilities</h2>
+          </div>
+        </div>
+        <SkeletonStatGrid count={3} />
+        <SkeletonTable rows={6} cols={5} />
+      </>
     )
   }
 
@@ -152,7 +176,7 @@ export function Utilities() {
                     month={month}
                     bill={bill}
                     isAdmin={isAdmin}
-                    onSaved={loadAll}
+                    onSaved={() => loadAll(true)}
                   />
                 )
               })}

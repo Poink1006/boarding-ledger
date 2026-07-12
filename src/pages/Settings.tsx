@@ -5,6 +5,8 @@ import { useToast } from '../contexts/ToastContext'
 import { Modal } from '../components/Modal'
 import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtDate } from '../lib/format'
+import { getCached, setCached, hasCached } from '../lib/cache'
+import { SkeletonBlock } from '../components/Skeleton'
 import type { Database } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
@@ -23,60 +25,86 @@ const TABS = [
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
+const CACHE_KEY = 'settings'
+interface SettingsData {
+  settings: AppSettings | null
+  apartments: Apartment[]
+  rooms: Room[]
+  priceGroups: RoomPriceGroup[]
+  updatedByProfile: Profile | null
+}
+
 export function Settings() {
   const { profile } = useAuth()
   const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState<TabId>('rates')
 
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>([])
-  const [updatedByProfile, setUpdatedByProfile] = useState<Profile | null>(null)
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<SettingsData>(CACHE_KEY)
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>(cached?.priceGroups ?? [])
+  const [updatedByProfile, setUpdatedByProfile] = useState<Profile | null>(cached?.updatedByProfile ?? null)
+  const [loading, setLoading] = useState(!cached)
   const [priceGroupModal, setPriceGroupModal] = useState<PriceGroupModalState>(null)
 
-  const [sharedRate, setSharedRate] = useState('')
-  const [privateRate, setPrivateRate] = useState('')
+  const [sharedRate, setSharedRate] = useState(cached?.settings ? String(cached.settings.default_shared_rate_per_pax) : '')
+  const [privateRate, setPrivateRate] = useState(cached?.settings ? String(cached.settings.default_private_rate_per_pax) : '')
   const [saving, setSaving] = useState(false)
 
-  const [electricityAllowance, setElectricityAllowance] = useState('')
-  const [waterAllowance, setWaterAllowance] = useState('')
+  const [electricityAllowance, setElectricityAllowance] = useState(
+    cached?.settings ? String(cached.settings.electricity_allowance_per_tenant) : '',
+  )
+  const [waterAllowance, setWaterAllowance] = useState(
+    cached?.settings ? String(cached.settings.water_allowance_per_tenant) : '',
+  )
   const [savingAllowances, setSavingAllowances] = useState(false)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [settingsRes, apartmentsRes, roomsRes, priceGroupsRes] = await Promise.all([
-      supabase.from('app_settings').select('*').single(),
-      supabase.from('apartments').select('*'),
-      supabase.from('rooms').select('*'),
-      supabase.from('room_price_groups').select('*'),
-    ])
-    if (settingsRes.error) showToast(settingsRes.error.message)
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (roomsRes.error) showToast(roomsRes.error.message)
-    if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      const [settingsRes, apartmentsRes, roomsRes, priceGroupsRes] = await Promise.all([
+        supabase.from('app_settings').select('*').single(),
+        supabase.from('apartments').select('*'),
+        supabase.from('rooms').select('*'),
+        supabase.from('room_price_groups').select('*'),
+      ])
+      if (settingsRes.error) showToast(settingsRes.error.message)
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (roomsRes.error) showToast(roomsRes.error.message)
+      if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
 
-    setSettings(settingsRes.data ?? null)
-    setSharedRate(settingsRes.data ? String(settingsRes.data.default_shared_rate_per_pax) : '')
-    setPrivateRate(settingsRes.data ? String(settingsRes.data.default_private_rate_per_pax) : '')
-    setElectricityAllowance(settingsRes.data ? String(settingsRes.data.electricity_allowance_per_tenant) : '')
-    setWaterAllowance(settingsRes.data ? String(settingsRes.data.water_allowance_per_tenant) : '')
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setRooms([...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)))
-    setPriceGroups([...(priceGroupsRes.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)))
+      let updatedBy: Profile | null = null
+      if (settingsRes.data?.updated_by) {
+        const { data: p } = await supabase.from('profiles').select('*').eq('id', settingsRes.data.updated_by).single()
+        updatedBy = p ?? null
+      }
 
-    if (settingsRes.data?.updated_by) {
-      const { data: p } = await supabase.from('profiles').select('*').eq('id', settingsRes.data.updated_by).single()
-      setUpdatedByProfile(p ?? null)
-    } else {
-      setUpdatedByProfile(null)
-    }
-    setLoading(false)
-  }, [showToast])
+      const data: SettingsData = {
+        settings: settingsRes.data ?? null,
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        rooms: [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)),
+        priceGroups: [...(priceGroupsRes.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+        updatedByProfile: updatedBy,
+      }
+      setCached(CACHE_KEY, data)
+      setSettings(data.settings)
+      setSharedRate(data.settings ? String(data.settings.default_shared_rate_per_pax) : '')
+      setPrivateRate(data.settings ? String(data.settings.default_private_rate_per_pax) : '')
+      setElectricityAllowance(data.settings ? String(data.settings.electricity_allowance_per_tenant) : '')
+      setWaterAllowance(data.settings ? String(data.settings.water_allowance_per_tenant) : '')
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setPriceGroups(data.priceGroups)
+      setUpdatedByProfile(data.updatedByProfile)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   async function handleSave() {
@@ -101,7 +129,7 @@ export function Settings() {
       return
     }
     showToast('Default rates updated.')
-    loadAll()
+    loadAll(true)
   }
 
   async function handleSaveAllowances() {
@@ -126,7 +154,7 @@ export function Settings() {
       return
     }
     showToast('Utility allowances updated.')
-    loadAll()
+    loadAll(true)
   }
 
   async function deletePriceGroup(group: RoomPriceGroup) {
@@ -139,14 +167,31 @@ export function Settings() {
       return
     }
     showToast('Pricing group deleted.')
-    loadAll()
+    loadAll(true)
   }
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading settings…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Settings</h2>
+          </div>
+        </div>
+        <div className="tab-bar">
+          <SkeletonBlock width={110} height={30} radius={8} style={{ marginRight: 12 }} />
+          <SkeletonBlock width={150} height={30} radius={8} style={{ marginRight: 12 }} />
+          <SkeletonBlock width={140} height={30} radius={8} />
+        </div>
+        <div className="table-wrap" style={{ padding: '20px 24px', maxWidth: 520 }}>
+          <SkeletonBlock width="100%" height={12} style={{ marginBottom: 8 }} />
+          <SkeletonBlock width="70%" height={12} style={{ marginBottom: 20 }} />
+          <div className="form-row">
+            <SkeletonBlock height={38} />
+            <SkeletonBlock height={38} />
+          </div>
+        </div>
+      </>
     )
   }
 
@@ -353,7 +398,7 @@ export function Settings() {
           onClose={() => setPriceGroupModal(null)}
           onSaved={() => {
             setPriceGroupModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}

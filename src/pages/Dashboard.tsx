@@ -7,6 +7,8 @@ import { computeTenantBalance } from '../lib/balance'
 import { fmtMoney, todayStr } from '../lib/format'
 import { TENANT_STATUS_LABEL, TENANT_STATUS_BADGE, occupiesBed } from '../lib/tenantStatus'
 import { Modal } from '../components/Modal'
+import { SkeletonStatGrid, SkeletonCardGrid } from '../components/Skeleton'
+import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database } from '../lib/database.types'
 
 type Apartment = Database['public']['Tables']['apartments']['Row']
@@ -17,59 +19,92 @@ type UtilityBill = Database['public']['Tables']['utility_bills']['Row']
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
 type RateChange = Database['public']['Tables']['tenant_rate_changes']['Row']
 
+const CACHE_KEY = 'dashboard'
+interface DashboardData {
+  apartments: Apartment[]
+  rooms: Room[]
+  tenants: Tenant[]
+  payments: Payment[]
+  utilityBills: UtilityBill[]
+  settings: AppSettings | null
+  rateHistory: RateChange[]
+}
+
 export function Dashboard() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
 
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [payments, setPayments] = useState<Payment[]>([])
-  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>([])
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [rateHistory, setRateHistory] = useState<RateChange[]>([])
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<DashboardData>(CACHE_KEY)
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
+  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
+  const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
+  const [loading, setLoading] = useState(!cached)
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [apartmentsRes, roomsRes, tenantsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
-      await Promise.all([
-        supabase.from('apartments').select('*'),
-        supabase.from('rooms').select('*'),
-        supabase.from('tenants').select('*'),
-        supabase.from('payments').select('*'),
-        supabase.from('utility_bills').select('*'),
-        supabase.from('app_settings').select('*').single(),
-        supabase.from('tenant_rate_changes').select('*'),
-      ])
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (roomsRes.error) showToast(roomsRes.error.message)
-    if (tenantsRes.error) showToast(tenantsRes.error.message)
-    if (paymentsRes.error) showToast(paymentsRes.error.message)
-    if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
-    if (settingsRes.error) showToast(settingsRes.error.message)
-    if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
+  const loadAll = useCallback(
+    async (silent: boolean) => {
+      if (!silent) setLoading(true)
+      const [apartmentsRes, roomsRes, tenantsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
+        await Promise.all([
+          supabase.from('apartments').select('*'),
+          supabase.from('rooms').select('*'),
+          supabase.from('tenants').select('*'),
+          supabase.from('payments').select('*'),
+          supabase.from('utility_bills').select('*'),
+          supabase.from('app_settings').select('*').single(),
+          supabase.from('tenant_rate_changes').select('*'),
+        ])
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (roomsRes.error) showToast(roomsRes.error.message)
+      if (tenantsRes.error) showToast(tenantsRes.error.message)
+      if (paymentsRes.error) showToast(paymentsRes.error.message)
+      if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
+      if (settingsRes.error) showToast(settingsRes.error.message)
+      if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
 
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setRooms([...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)))
-    setTenants(tenantsRes.data ?? [])
-    setPayments(paymentsRes.data ?? [])
-    setUtilityBills(utilityBillsRes.data ?? [])
-    setSettings(settingsRes.data ?? null)
-    setRateHistory(rateHistoryRes.data ?? [])
-    setLoading(false)
-  }, [showToast])
+      const data: DashboardData = {
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        rooms: [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)),
+        tenants: tenantsRes.data ?? [],
+        payments: paymentsRes.data ?? [],
+        utilityBills: utilityBillsRes.data ?? [],
+        settings: settingsRes.data ?? null,
+        rateHistory: rateHistoryRes.data ?? [],
+      }
+      setCached(CACHE_KEY, data)
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setTenants(data.tenants)
+      setPayments(data.payments)
+      setUtilityBills(data.utilityBills)
+      setSettings(data.settings)
+      setRateHistory(data.rateHistory)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading dashboard…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Dashboard</h2>
+          </div>
+        </div>
+        <SkeletonStatGrid count={5} />
+        <div className="section-title">Occupancy by apartment</div>
+        <SkeletonCardGrid count={4} />
+      </>
     )
   }
 

@@ -6,6 +6,8 @@ import { Modal } from '../components/Modal'
 import { computeTenantBalance } from '../lib/balance'
 import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtDate, todayStr } from '../lib/format'
+import { SkeletonTable } from '../components/Skeleton'
+import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database, PaymentType } from '../lib/database.types'
 
 type Tenant = Database['public']['Tables']['tenants']['Row']
@@ -25,18 +27,30 @@ function BalanceBadge({ value, zeroLabel = 'Paid up' }: { value: number; zeroLab
   return <span className="badge badge-pending">{zeroLabel}</span>
 }
 
+const CACHE_KEY = 'payments'
+interface PaymentsData {
+  tenants: Tenant[]
+  apartments: Apartment[]
+  rooms: Room[]
+  payments: Payment[]
+  utilityBills: UtilityBill[]
+  settings: AppSettings | null
+  rateHistory: RateChange[]
+}
+
 export function Payments() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
 
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [payments, setPayments] = useState<Payment[]>([])
-  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>([])
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [rateHistory, setRateHistory] = useState<RateChange[]>([])
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<PaymentsData>(CACHE_KEY)
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
+  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
+  const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
+  const [loading, setLoading] = useState(!cached)
 
   const [activeTab, setActiveTab] = useState<PaymentType>('rent')
   const [search, setSearch] = useState('')
@@ -49,38 +63,52 @@ export function Payments() {
   const [paymentModal, setPaymentModal] = useState<PaymentModalState>(null)
   const [historyModal, setHistoryModal] = useState<HistoryModalState>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [tenantsRes, apartmentsRes, roomsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
-      await Promise.all([
-        supabase.from('tenants').select('*'),
-        supabase.from('apartments').select('*'),
-        supabase.from('rooms').select('*'),
-        supabase.from('payments').select('*'),
-        supabase.from('utility_bills').select('*'),
-        supabase.from('app_settings').select('*').single(),
-        supabase.from('tenant_rate_changes').select('*'),
-      ])
-    if (tenantsRes.error) showToast(tenantsRes.error.message)
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (roomsRes.error) showToast(roomsRes.error.message)
-    if (paymentsRes.error) showToast(paymentsRes.error.message)
-    if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
-    if (settingsRes.error) showToast(settingsRes.error.message)
-    if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      const [tenantsRes, apartmentsRes, roomsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
+        await Promise.all([
+          supabase.from('tenants').select('*'),
+          supabase.from('apartments').select('*'),
+          supabase.from('rooms').select('*'),
+          supabase.from('payments').select('*'),
+          supabase.from('utility_bills').select('*'),
+          supabase.from('app_settings').select('*').single(),
+          supabase.from('tenant_rate_changes').select('*'),
+        ])
+      if (tenantsRes.error) showToast(tenantsRes.error.message)
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (roomsRes.error) showToast(roomsRes.error.message)
+      if (paymentsRes.error) showToast(paymentsRes.error.message)
+      if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
+      if (settingsRes.error) showToast(settingsRes.error.message)
+      if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
 
-    setTenants(tenantsRes.data ?? [])
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setRooms(roomsRes.data ?? [])
-    setPayments(paymentsRes.data ?? [])
-    setUtilityBills(utilityBillsRes.data ?? [])
-    setSettings(settingsRes.data ?? null)
-    setRateHistory(rateHistoryRes.data ?? [])
-    setLoading(false)
-  }, [showToast])
+      const data: PaymentsData = {
+        tenants: tenantsRes.data ?? [],
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        rooms: roomsRes.data ?? [],
+        payments: paymentsRes.data ?? [],
+        utilityBills: utilityBillsRes.data ?? [],
+        settings: settingsRes.data ?? null,
+        rateHistory: rateHistoryRes.data ?? [],
+      }
+      setCached(CACHE_KEY, data)
+      setTenants(data.tenants)
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setPayments(data.payments)
+      setUtilityBills(data.utilityBills)
+      setSettings(data.settings)
+      setRateHistory(data.rateHistory)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   async function deletePayment(payment: Payment) {
@@ -91,14 +119,19 @@ export function Payments() {
       return
     }
     showToast('Payment deleted.')
-    loadAll()
+    loadAll(true)
   }
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading payments…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Payments</h2>
+          </div>
+        </div>
+        <SkeletonTable rows={8} cols={6} />
+      </>
     )
   }
 
@@ -285,7 +318,7 @@ export function Payments() {
           onClose={() => setPaymentModal(null)}
           onSaved={() => {
             setPaymentModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}

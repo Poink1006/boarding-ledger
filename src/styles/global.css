@@ -615,6 +615,22 @@ input[type='number']::-webkit-inner-spin-button {
   color: var(--ink);
 }
 
+/* ---- Skeleton loaders ---- */
+.skeleton {
+  display: block;
+  background: linear-gradient(90deg, var(--paper-alt) 25%, var(--line-soft) 37%, var(--paper-alt) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
 /* ---- Modal ---- */
 .modal-overlay {
   position: fixed;

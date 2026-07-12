@@ -9,6 +9,8 @@ import { fmtMoney, fmtDate, fmtDateShort, addMonths, todayStr } from '../lib/for
 import { occupiesBed, TENANT_STATUS_LABEL, TENANT_STATUS_BADGE } from '../lib/tenantStatus'
 import { DEPOSIT_STATUS_LABEL, DEPOSIT_STATUS_BADGE } from '../lib/depositStatus'
 import { computeTenantBalance } from '../lib/balance'
+import { SkeletonTable } from '../components/Skeleton'
+import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database } from '../lib/database.types'
 
 type Apartment = Database['public']['Tables']['apartments']['Row']
@@ -82,19 +84,32 @@ async function insertTenantWithRetry(
   return { data: null, error: { message: 'Could not generate a unique tenant number — please try saving again.' } }
 }
 
+const CACHE_KEY = 'tenants'
+interface TenantsData {
+  apartments: Apartment[]
+  rooms: Room[]
+  settings: AppSettings | null
+  tenants: Tenant[]
+  payments: Payment[]
+  utilityBills: UtilityBill[]
+  priceGroups: RoomPriceGroup[]
+  rateHistory: RateChange[]
+}
+
 export function Tenants() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
 
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [payments, setPayments] = useState<Payment[]>([])
-  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>([])
-  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>([])
-  const [rateHistory, setRateHistory] = useState<RateChange[]>([])
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<TenantsData>(CACHE_KEY)
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
+  const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
+  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>(cached?.priceGroups ?? [])
+  const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
+  const [loading, setLoading] = useState(!cached)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'current' | 'pending' | 'active' | 'inactive' | 'all'>('current')
@@ -104,41 +119,56 @@ export function Tenants() {
   const [moveModal, setMoveModal] = useState<MoveModalState>(null)
   const [addDepositModal, setAddDepositModal] = useState<AddDepositModalState>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [apartmentsRes, roomsRes, settingsRes, tenantsRes, paymentsRes, utilityBillsRes, priceGroupsRes, rateHistoryRes] =
-      await Promise.all([
-        supabase.from('apartments').select('*'),
-        supabase.from('rooms').select('*'),
-        supabase.from('app_settings').select('*').single(),
-        supabase.from('tenants').select('*'),
-        supabase.from('payments').select('*'),
-        supabase.from('utility_bills').select('*'),
-        supabase.from('room_price_groups').select('*'),
-        supabase.from('tenant_rate_changes').select('*'),
-      ])
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (roomsRes.error) showToast(roomsRes.error.message)
-    if (settingsRes.error) showToast(settingsRes.error.message)
-    if (tenantsRes.error) showToast(tenantsRes.error.message)
-    if (paymentsRes.error) showToast(paymentsRes.error.message)
-    if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
-    if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
-    if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      const [apartmentsRes, roomsRes, settingsRes, tenantsRes, paymentsRes, utilityBillsRes, priceGroupsRes, rateHistoryRes] =
+        await Promise.all([
+          supabase.from('apartments').select('*'),
+          supabase.from('rooms').select('*'),
+          supabase.from('app_settings').select('*').single(),
+          supabase.from('tenants').select('*'),
+          supabase.from('payments').select('*'),
+          supabase.from('utility_bills').select('*'),
+          supabase.from('room_price_groups').select('*'),
+          supabase.from('tenant_rate_changes').select('*'),
+        ])
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (roomsRes.error) showToast(roomsRes.error.message)
+      if (settingsRes.error) showToast(settingsRes.error.message)
+      if (tenantsRes.error) showToast(tenantsRes.error.message)
+      if (paymentsRes.error) showToast(paymentsRes.error.message)
+      if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
+      if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
+      if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
 
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setRooms([...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)))
-    setSettings(settingsRes.data ?? null)
-    setTenants([...(tenantsRes.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)))
-    setPayments(paymentsRes.data ?? [])
-    setUtilityBills(utilityBillsRes.data ?? [])
-    setPriceGroups(priceGroupsRes.data ?? [])
-    setRateHistory(rateHistoryRes.data ?? [])
-    setLoading(false)
-  }, [showToast])
+      const data: TenantsData = {
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        rooms: [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)),
+        settings: settingsRes.data ?? null,
+        tenants: [...(tenantsRes.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+        payments: paymentsRes.data ?? [],
+        utilityBills: utilityBillsRes.data ?? [],
+        priceGroups: priceGroupsRes.data ?? [],
+        rateHistory: rateHistoryRes.data ?? [],
+      }
+      setCached(CACHE_KEY, data)
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setSettings(data.settings)
+      setTenants(data.tenants)
+      setPayments(data.payments)
+      setUtilityBills(data.utilityBills)
+      setPriceGroups(data.priceGroups)
+      setRateHistory(data.rateHistory)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   // reserved tenants auto-activate once they've paid at least one month's
@@ -168,7 +198,7 @@ export function Tenants() {
           ? `${toActivate[0].first_name} ${toActivate[0].last_name} activated — a month's rent is paid.`
           : `${toActivate.length} reserved tenants activated — a month's rent is paid.`,
       )
-      loadAll()
+      loadAll(true)
     })()
   }, [loading, tenants, payments, showToast, loadAll])
 
@@ -184,7 +214,7 @@ export function Tenants() {
       return
     }
     showToast(tenant.status === 'pending' ? 'Reservation cancelled.' : 'Tenant moved out.')
-    loadAll()
+    loadAll(true)
   }
 
   async function deleteTenant(tenant: Tenant) {
@@ -200,14 +230,19 @@ export function Tenants() {
       return
     }
     showToast('Tenant deleted.')
-    loadAll()
+    loadAll(true)
   }
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading tenants…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Tenants</h2>
+          </div>
+        </div>
+        <SkeletonTable rows={8} cols={8} />
+      </>
     )
   }
 
@@ -394,7 +429,7 @@ export function Tenants() {
           onClose={() => setTenantModal(null)}
           onSaved={() => {
             setTenantModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}
@@ -405,7 +440,7 @@ export function Tenants() {
           onClose={() => setDepositModal(null)}
           onSaved={() => {
             setDepositModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}
@@ -416,7 +451,7 @@ export function Tenants() {
           onClose={() => setAddDepositModal(null)}
           onSaved={() => {
             setAddDepositModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}
@@ -432,7 +467,7 @@ export function Tenants() {
           onClose={() => setMoveModal(null)}
           onSaved={() => {
             setMoveModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}

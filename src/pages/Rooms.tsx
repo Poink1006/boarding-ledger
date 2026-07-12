@@ -6,6 +6,8 @@ import { Modal } from '../components/Modal'
 import { effectiveCapacity, effectiveRate, naturalSort } from '../lib/rooms'
 import { fmtMoney } from '../lib/format'
 import { occupiesBed, TENANT_STATUS_LABEL, TENANT_STATUS_BADGE } from '../lib/tenantStatus'
+import { SkeletonCardGrid } from '../components/Skeleton'
+import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database, RoomMode } from '../lib/database.types'
 
 type Apartment = Database['public']['Tables']['apartments']['Row']
@@ -17,54 +19,80 @@ type RoomPriceGroup = Database['public']['Tables']['room_price_groups']['Row']
 type ApartmentModalState = { mode: 'add' } | { mode: 'edit'; apartment: Apartment } | null
 type RoomModalState = { mode: 'add'; apartmentId: string } | { mode: 'edit'; room: Room } | null
 
+const CACHE_KEY = 'rooms'
+interface RoomsData {
+  apartments: Apartment[]
+  rooms: Room[]
+  tenants: Tenant[]
+  settings: AppSettings | null
+  priceGroups: RoomPriceGroup[]
+  occupancy: Record<string, number>
+}
+
 export function Rooms() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
 
-  const [apartments, setApartments] = useState<Apartment[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>([])
-  const [occupancy, setOccupancy] = useState<Record<string, number>>({})
-  const [loading, setLoading] = useState(true)
+  const cached = getCached<RoomsData>(CACHE_KEY)
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
+  const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>(cached?.priceGroups ?? [])
+  const [occupancy, setOccupancy] = useState<Record<string, number>>(cached?.occupancy ?? {})
+  const [loading, setLoading] = useState(!cached)
 
   const [apartmentModal, setApartmentModal] = useState<ApartmentModalState>(null)
   const [roomModal, setRoomModal] = useState<RoomModalState>(null)
   const [tenantsModalRoom, setTenantsModalRoom] = useState<Room | null>(null)
 
-  const loadAll = useCallback(async () => {
-    setLoading(true)
-    const [apartmentsRes, roomsRes, settingsRes, tenantsRes, priceGroupsRes] = await Promise.all([
-      supabase.from('apartments').select('*'),
-      supabase.from('rooms').select('*'),
-      supabase.from('app_settings').select('*').single(),
-      supabase.from('tenants').select('*'),
-      supabase.from('room_price_groups').select('*'),
-    ])
-    if (apartmentsRes.error) showToast(apartmentsRes.error.message)
-    if (roomsRes.error) showToast(roomsRes.error.message)
-    if (settingsRes.error) showToast(settingsRes.error.message)
-    if (tenantsRes.error) showToast(tenantsRes.error.message)
-    if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      const [apartmentsRes, roomsRes, settingsRes, tenantsRes, priceGroupsRes] = await Promise.all([
+        supabase.from('apartments').select('*'),
+        supabase.from('rooms').select('*'),
+        supabase.from('app_settings').select('*').single(),
+        supabase.from('tenants').select('*'),
+        supabase.from('room_price_groups').select('*'),
+      ])
+      if (apartmentsRes.error) showToast(apartmentsRes.error.message)
+      if (roomsRes.error) showToast(roomsRes.error.message)
+      if (settingsRes.error) showToast(settingsRes.error.message)
+      if (tenantsRes.error) showToast(tenantsRes.error.message)
+      if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
 
-    setApartments([...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)))
-    setRooms([...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)))
-    setSettings(settingsRes.data ?? null)
-    setPriceGroups(priceGroupsRes.data ?? [])
+      const sortedApartments = [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name))
+      const sortedRooms = [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label))
+      const activeTenants = (tenantsRes.data ?? []).filter((t) => occupiesBed(t.status))
+      const counts: Record<string, number> = {}
+      for (const t of activeTenants) {
+        if (t.room_id) counts[t.room_id] = (counts[t.room_id] ?? 0) + 1
+      }
 
-    const activeTenants = (tenantsRes.data ?? []).filter((t) => occupiesBed(t.status))
-    setTenants(activeTenants)
-    const counts: Record<string, number> = {}
-    for (const t of activeTenants) {
-      if (t.room_id) counts[t.room_id] = (counts[t.room_id] ?? 0) + 1
-    }
-    setOccupancy(counts)
-    setLoading(false)
-  }, [showToast])
+      const data: RoomsData = {
+        apartments: sortedApartments,
+        rooms: sortedRooms,
+        tenants: activeTenants,
+        settings: settingsRes.data ?? null,
+        priceGroups: priceGroupsRes.data ?? [],
+        occupancy: counts,
+      }
+      setCached(CACHE_KEY, data)
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setSettings(data.settings)
+      setPriceGroups(data.priceGroups)
+      setTenants(data.tenants)
+      setOccupancy(data.occupancy)
+      setLoading(false)
+    },
+    [showToast],
+  )
 
   useEffect(() => {
-    loadAll()
+    loadAll(hasCached(CACHE_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
   async function deleteApartment(apartment: Apartment) {
@@ -80,7 +108,7 @@ export function Rooms() {
       return
     }
     showToast('Apartment deleted.')
-    loadAll()
+    loadAll(true)
   }
 
   async function deleteRoom(room: Room) {
@@ -93,14 +121,19 @@ export function Rooms() {
       return
     }
     showToast('Room deleted.')
-    loadAll()
+    loadAll(true)
   }
 
   if (loading) {
     return (
-      <div className="empty-state">
-        <h3>Loading rooms…</h3>
-      </div>
+      <>
+        <div className="page-head">
+          <div>
+            <h2>Units &amp; Rooms</h2>
+          </div>
+        </div>
+        <SkeletonCardGrid count={6} />
+      </>
     )
   }
 
@@ -210,7 +243,7 @@ export function Rooms() {
           onClose={() => setApartmentModal(null)}
           onSaved={() => {
             setApartmentModal(null)
-            loadAll()
+            loadAll(true)
           }}
         />
       )}
@@ -225,7 +258,7 @@ export function Rooms() {
           onClose={() => setRoomModal(null)}
           onSaved={() => {
             setRoomModal(null)
-            loadAll()
+            loadAll(true)
           }}
           onDelete={
             roomModal.mode === 'edit'
