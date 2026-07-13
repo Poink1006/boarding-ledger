@@ -384,3 +384,82 @@ create trigger utility_bills_set_updated_at before update on public.utility_bill
   for each row execute function public.set_updated_at();
 create trigger room_price_groups_set_updated_at before update on public.room_price_groups
   for each row execute function public.set_updated_at();
+
+-- ----------------------------------------------------------------------------
+-- audit_log: append-only record of who changed what and when. See
+-- supabase/migrations/011_audit_log.sql for the full rationale.
+-- ----------------------------------------------------------------------------
+create table public.audit_log (
+  id uuid primary key default gen_random_uuid(),
+  table_name text not null,
+  record_id text,
+  action text not null check (action in ('INSERT', 'UPDATE', 'DELETE')),
+  actor_id uuid,
+  actor_name text,
+  old_data jsonb,
+  new_data jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index audit_log_created_at_idx on public.audit_log(created_at desc);
+create index audit_log_table_name_idx on public.audit_log(table_name);
+
+alter table public.audit_log enable row level security;
+
+-- admins read only; no client can insert/update/delete (trigger writes via SECURITY DEFINER)
+create policy "audit_log_select_admin_only"
+  on public.audit_log for select to authenticated
+  using (public.is_admin());
+
+create or replace function public.audit_trigger()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor uuid := auth.uid();
+  v_actor_name text;
+begin
+  select full_name into v_actor_name from public.profiles where id = v_actor;
+
+  if (tg_op = 'DELETE') then
+    insert into public.audit_log(table_name, record_id, action, actor_id, actor_name, old_data, new_data)
+    values (tg_table_name, (old.id)::text, tg_op, v_actor, v_actor_name, to_jsonb(old), null);
+    return old;
+  elsif (tg_op = 'UPDATE') then
+    insert into public.audit_log(table_name, record_id, action, actor_id, actor_name, old_data, new_data)
+    values (tg_table_name, (new.id)::text, tg_op, v_actor, v_actor_name, to_jsonb(old), to_jsonb(new));
+    return new;
+  else
+    insert into public.audit_log(table_name, record_id, action, actor_id, actor_name, old_data, new_data)
+    values (tg_table_name, (new.id)::text, tg_op, v_actor, v_actor_name, null, to_jsonb(new));
+    return new;
+  end if;
+end;
+$$;
+
+create trigger audit_tenants
+  after insert or update or delete on public.tenants
+  for each row execute function public.audit_trigger();
+create trigger audit_payments
+  after insert or update or delete on public.payments
+  for each row execute function public.audit_trigger();
+create trigger audit_utility_bills
+  after insert or update or delete on public.utility_bills
+  for each row execute function public.audit_trigger();
+create trigger audit_tenant_rate_changes
+  after insert or update or delete on public.tenant_rate_changes
+  for each row execute function public.audit_trigger();
+create trigger audit_rooms
+  after insert or update or delete on public.rooms
+  for each row execute function public.audit_trigger();
+create trigger audit_apartments
+  after insert or update or delete on public.apartments
+  for each row execute function public.audit_trigger();
+create trigger audit_room_price_groups
+  after insert or update or delete on public.room_price_groups
+  for each row execute function public.audit_trigger();
+create trigger audit_app_settings
+  after insert or update or delete on public.app_settings
+  for each row execute function public.audit_trigger();

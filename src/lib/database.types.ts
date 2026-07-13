@@ -357,6 +357,42 @@ export interface Database {
         }
         Relationships: []
       }
+      audit_log: {
+        Row: {
+          id: string
+          table_name: string
+          record_id: string | null
+          action: 'INSERT' | 'UPDATE' | 'DELETE'
+          actor_id: string | null
+          actor_name: string | null
+          old_data: Record<string, unknown> | null
+          new_data: Record<string, unknown> | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          table_name: string
+          record_id?: string | null
+          action: 'INSERT' | 'UPDATE' | 'DELETE'
+          actor_id?: string | null
+          actor_name?: string | null
+          old_data?: Record<string, unknown> | null
+          new_data?: Record<string, unknown> | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          table_name?: string
+          record_id?: string | null
+          action?: 'INSERT' | 'UPDATE' | 'DELETE'
+          actor_id?: string | null
+          actor_name?: string | null
+          old_data?: Record<string, unknown> | null
+          new_data?: Record<string, unknown> | null
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -6,7 +6,7 @@ import { Modal } from '../components/Modal'
 import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtDate } from '../lib/format'
 import { getCached, setCached, hasCached } from '../lib/cache'
-import { SkeletonBlock } from '../components/Skeleton'
+import { SkeletonBlock, SkeletonTable } from '../components/Skeleton'
 import type { Database } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
@@ -23,8 +23,63 @@ const TABS = [
   { id: 'groups', label: 'Room pricing groups' },
   { id: 'utilities', label: 'Utility allowances' },
   { id: 'overrides', label: 'Custom overrides' },
+  { id: 'activity', label: 'Activity log' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
+
+type AuditRow = Database['public']['Tables']['audit_log']['Row']
+
+// human-readable summary of an audit entry for the activity log
+function describeAudit(row: AuditRow): { action: string; badge: string; entity: string } {
+  const d = (row.action === 'DELETE' ? row.old_data : row.new_data) ?? {}
+  const s = (k: string) => (d[k] == null ? '' : String(d[k]))
+  const money = (k: string) => fmtMoney(Number(d[k] ?? 0))
+  const cap = (v: string) => (v ? v.charAt(0).toUpperCase() + v.slice(1) : v)
+
+  let entity: string
+  switch (row.table_name) {
+    case 'tenants':
+      entity = `Tenant ${s('first_name')} ${s('last_name')}`.trim()
+      break
+    case 'payments':
+      entity = `${cap(s('payment_type') || 'rent')} payment ${money('amount')}`
+      break
+    case 'utility_bills':
+      entity = `${cap(s('utility_type'))} bill ${money('total_cost')}`
+      break
+    case 'tenant_rate_changes':
+      entity = `Rate change ${money('monthly_rate')}`
+      break
+    case 'rooms':
+      entity = `Room ${s('label')}`.trim()
+      break
+    case 'apartments':
+      entity = `Apartment ${s('name')}`.trim()
+      break
+    case 'room_price_groups':
+      entity = `Pricing group ${s('name')}`.trim()
+      break
+    case 'app_settings':
+      entity = 'App settings'
+      break
+    default:
+      entity = row.table_name
+  }
+
+  const action = row.action === 'INSERT' ? 'Created' : row.action === 'UPDATE' ? 'Updated' : 'Deleted'
+  const badge = row.action === 'INSERT' ? 'badge-active' : row.action === 'UPDATE' ? 'badge-partial' : 'badge-overdue'
+  return { action, badge, entity }
+}
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
 
 const CACHE_KEY = 'settings'
 interface SettingsData {
@@ -62,6 +117,22 @@ export function Settings() {
     cached?.settings ? String(cached.settings.water_allowance_per_tenant) : '',
   )
   const [savingAllowances, setSavingAllowances] = useState(false)
+
+  // audit log is fetched on demand when the Activity log tab is opened
+  const [auditLog, setAuditLog] = useState<AuditRow[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+
+  const loadAudit = useCallback(async () => {
+    setAuditLoading(true)
+    const { data, error } = await supabase
+      .from('audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (error) showToast(error.message)
+    setAuditLog(data ?? [])
+    setAuditLoading(false)
+  }, [showToast])
 
   const loadAll = useCallback(
     async (silent = false) => {
@@ -113,6 +184,10 @@ export function Settings() {
     loadAll(hasCached(CACHE_KEY))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
+
+  useEffect(() => {
+    if (activeTab === 'activity') loadAudit()
+  }, [activeTab, loadAudit])
 
   async function handleSave() {
     const shared = Number(sharedRate)
@@ -400,6 +475,60 @@ export function Settings() {
             Set or clear a tenant's custom rate from their edit form on the Tenants page.
           </div>
         </div>
+      )}
+
+      {activeTab === 'activity' && (
+        <>
+          <div className="page-head" style={{ marginBottom: 12 }}>
+            <p className="hint" style={{ margin: 0, maxWidth: 620 }}>
+              Every change to tenants, payments, deposits, rates, rooms, and pricing is recorded here —
+              who did it and when. Entries can't be edited or deleted. Showing the 200 most recent.
+            </p>
+            <button className="btn btn-ghost btn-sm" onClick={loadAudit} disabled={auditLoading}>
+              {auditLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {auditLoading && auditLog.length === 0 ? (
+            <SkeletonTable rows={6} cols={4} />
+          ) : auditLog.length === 0 ? (
+            <div className="table-wrap">
+              <div className="empty-state">
+                <h3>No activity yet</h3>
+                <p>Changes made in the app will show up here.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Who</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLog.map((row) => {
+                    const { action, badge, entity } = describeAudit(row)
+                    return (
+                      <tr key={row.id}>
+                        <td className="sub-cell" style={{ whiteSpace: 'nowrap' }}>
+                          {fmtDateTime(row.created_at)}
+                        </td>
+                        <td>{row.actor_name || '—'}</td>
+                        <td>
+                          <span className={`badge ${badge}`}>{action}</span>
+                        </td>
+                        <td>{entity}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {priceGroupModal && (
