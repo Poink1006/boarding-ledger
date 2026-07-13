@@ -308,21 +308,6 @@ export function Payments() {
         )}
       </div>
 
-      {paymentModal && (
-        <PaymentModal
-          tenantId={paymentModal.tenantId}
-          initial={paymentModal.initial}
-          defaultType={paymentModal.defaultType}
-          tenants={tenants}
-          rooms={rooms}
-          onClose={() => setPaymentModal(null)}
-          onSaved={() => {
-            setPaymentModal(null)
-            loadAll(true)
-          }}
-        />
-      )}
-
       {historyModal && (
         <HistoryModal
           tenant={historyModal.tenant}
@@ -335,6 +320,23 @@ export function Payments() {
             setPaymentModal({ tenantId: historyModal.tenant.id, initial: payment, defaultType: payment.payment_type })
           }
           onDelete={deletePayment}
+        />
+      )}
+
+      {/* rendered after HistoryModal so it stacks on top when opened from it —
+          otherwise History's overlay would swallow clicks/typing (fixed bug) */}
+      {paymentModal && (
+        <PaymentModal
+          tenantId={paymentModal.tenantId}
+          initial={paymentModal.initial}
+          defaultType={paymentModal.defaultType}
+          tenants={tenants}
+          rooms={rooms}
+          onClose={() => setPaymentModal(null)}
+          onSaved={() => {
+            setPaymentModal(null)
+            loadAll(true)
+          }}
         />
       )}
     </>
