@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { Modal } from '../components/Modal'
+import { PrintModal } from '../components/PrintModal'
+import { ReceiptDoc, StatementDoc } from '../components/documents'
 import { computeTenantBalance } from '../lib/balance'
 import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtDate, todayStr } from '../lib/format'
@@ -20,6 +22,8 @@ type RateChange = Database['public']['Tables']['tenant_rate_changes']['Row']
 
 type PaymentModalState = { tenantId: string; initial: Payment | null; defaultType: PaymentType } | null
 type HistoryModalState = { tenant: Tenant } | null
+type ReceiptModalState = { tenant: Tenant; payment: Payment } | null
+type StatementModalState = { tenant: Tenant } | null
 
 function BalanceBadge({ value, zeroLabel = 'Paid up' }: { value: number; zeroLabel?: string }) {
   if (value < 0) return <span className="badge badge-overdue">Owes {fmtMoney(-value)}</span>
@@ -39,7 +43,7 @@ interface PaymentsData {
 }
 
 export function Payments() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
   const { showToast } = useToast()
 
   const cached = getCached<PaymentsData>(CACHE_KEY)
@@ -62,6 +66,8 @@ export function Payments() {
 
   const [paymentModal, setPaymentModal] = useState<PaymentModalState>(null)
   const [historyModal, setHistoryModal] = useState<HistoryModalState>(null)
+  const [receiptModal, setReceiptModal] = useState<ReceiptModalState>(null)
+  const [statementModal, setStatementModal] = useState<StatementModalState>(null)
 
   const loadAll = useCallback(
     async (silent = false) => {
@@ -303,6 +309,9 @@ export function Payments() {
                         <button className="btn btn-ghost btn-sm" onClick={() => setHistoryModal({ tenant })}>
                           History
                         </button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setStatementModal({ tenant })}>
+                          Statement
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -325,6 +334,7 @@ export function Payments() {
             setPaymentModal({ tenantId: historyModal.tenant.id, initial: payment, defaultType: payment.payment_type })
           }
           onDelete={deletePayment}
+          onReceipt={(payment) => setReceiptModal({ tenant: historyModal.tenant, payment })}
         />
       )}
 
@@ -344,6 +354,31 @@ export function Payments() {
           }}
         />
       )}
+
+      {receiptModal && (
+        <PrintModal onClose={() => setReceiptModal(null)}>
+          <ReceiptDoc
+            settings={settings}
+            tenant={receiptModal.tenant}
+            room={rooms.find((r) => r.id === receiptModal.tenant.room_id)}
+            payment={receiptModal.payment}
+            balance={computeTenantBalance(receiptModal.tenant, payments, rateHistory, utilityContext)}
+            staffName={profile?.full_name ?? ''}
+          />
+        </PrintModal>
+      )}
+
+      {statementModal && (
+        <PrintModal onClose={() => setStatementModal(null)}>
+          <StatementDoc
+            settings={settings}
+            tenant={statementModal.tenant}
+            room={rooms.find((r) => r.id === statementModal.tenant.room_id)}
+            balance={computeTenantBalance(statementModal.tenant, payments, rateHistory, utilityContext)}
+            payments={payments.filter((p) => p.tenant_id === statementModal.tenant.id)}
+          />
+        </PrintModal>
+      )}
     </>
   )
 }
@@ -357,6 +392,7 @@ function HistoryModal({
   onLogPayment,
   onEdit,
   onDelete,
+  onReceipt,
 }: {
   tenant: Tenant
   payments: Payment[]
@@ -366,6 +402,7 @@ function HistoryModal({
   onLogPayment: () => void
   onEdit: (payment: Payment) => void
   onDelete: (payment: Payment) => void
+  onReceipt: (payment: Payment) => void
 }) {
   const sorted = [...payments].sort((a, b) => (a.date_paid < b.date_paid ? 1 : -1))
 
@@ -485,6 +522,9 @@ function HistoryModal({
                 {p.notes && <div className="sub-cell">{p.notes}</div>}
               </div>
               <div className="row-actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => onReceipt(p)}>
+                  Receipt
+                </button>
                 <button className="btn btn-ghost btn-sm" onClick={() => onEdit(p)}>
                   Edit
                 </button>

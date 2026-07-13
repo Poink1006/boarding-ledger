@@ -40,6 +40,9 @@ export interface Database {
           default_private_rate_per_pax: number
           electricity_allowance_per_tenant: number
           water_allowance_per_tenant: number
+          business_name: string
+          business_address: string | null
+          business_contact: string | null
           updated_at: string
           updated_by: string | null
         }
@@ -49,6 +52,9 @@ export interface Database {
           default_private_rate_per_pax?: number
           electricity_allowance_per_tenant?: number
           water_allowance_per_tenant?: number
+          business_name?: string
+          business_address?: string | null
+          business_contact?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -58,6 +64,9 @@ export interface Database {
           default_private_rate_per_pax?: number
           electricity_allowance_per_tenant?: number
           water_allowance_per_tenant?: number
+          business_name?: string
+          business_address?: string | null
+          business_contact?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -293,6 +302,7 @@ export interface Database {
           payment_type: PaymentType
           date_paid: string
           notes: string | null
+          receipt_no: number | null
           deleted_at: string | null
           created_at: string
           created_by: string | null
@@ -305,6 +315,7 @@ export interface Database {
           payment_type?: PaymentType
           date_paid?: string
           notes?: string | null
+          receipt_no?: number | null
           deleted_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -317,6 +328,7 @@ export interface Database {
           payment_type?: PaymentType
           date_paid?: string
           notes?: string | null
+          receipt_no?: number | null
           deleted_at?: string | null
           created_at?: string
           created_by?: string | null

@@ -23,6 +23,7 @@ const TABS = [
   { id: 'groups', label: 'Room pricing groups' },
   { id: 'utilities', label: 'Utility allowances' },
   { id: 'overrides', label: 'Custom overrides' },
+  { id: 'organization', label: 'Organization' },
   { id: 'activity', label: 'Activity log' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -118,6 +119,11 @@ export function Settings() {
   )
   const [savingAllowances, setSavingAllowances] = useState(false)
 
+  const [bizName, setBizName] = useState(cached?.settings?.business_name ?? '')
+  const [bizAddress, setBizAddress] = useState(cached?.settings?.business_address ?? '')
+  const [bizContact, setBizContact] = useState(cached?.settings?.business_contact ?? '')
+  const [savingOrg, setSavingOrg] = useState(false)
+
   // audit log is fetched on demand when the Activity log tab is opened
   const [auditLog, setAuditLog] = useState<AuditRow[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
@@ -170,6 +176,9 @@ export function Settings() {
       setPrivateRate(data.settings ? String(data.settings.default_private_rate_per_pax) : '')
       setElectricityAllowance(data.settings ? String(data.settings.electricity_allowance_per_tenant) : '')
       setWaterAllowance(data.settings ? String(data.settings.water_allowance_per_tenant) : '')
+      setBizName(data.settings?.business_name ?? '')
+      setBizAddress(data.settings?.business_address ?? '')
+      setBizContact(data.settings?.business_contact ?? '')
       setApartments(data.apartments)
       setRooms(data.rooms)
       setTenants(data.tenants)
@@ -236,6 +245,30 @@ export function Settings() {
       return
     }
     showToast('Utility allowances updated.')
+    loadAll(true)
+  }
+
+  async function handleSaveOrg() {
+    if (!bizName.trim()) {
+      showToast('Business name is required.')
+      return
+    }
+    setSavingOrg(true)
+    const { error } = await supabase
+      .from('app_settings')
+      .update({
+        business_name: bizName.trim(),
+        business_address: bizAddress.trim() || null,
+        business_contact: bizContact.trim() || null,
+        updated_by: profile?.id,
+      })
+      .eq('id', true)
+    setSavingOrg(false)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast('Organization details updated.')
     loadAll(true)
   }
 
@@ -474,6 +507,37 @@ export function Settings() {
           <div className="hint" style={{ padding: '12px 24px' }}>
             Set or clear a tenant's custom rate from their edit form on the Tenants page.
           </div>
+        </div>
+      )}
+
+      {activeTab === 'organization' && (
+        <div className="table-wrap" style={{ padding: '20px 24px', maxWidth: 520 }}>
+          <p className="hint" style={{ marginBottom: 16 }}>
+            These details print at the top of every receipt and statement of account you give a tenant.
+          </p>
+          <div className="form-group">
+            <label>Business name</label>
+            <input value={bizName} onChange={(e) => setBizName(e.target.value)} placeholder="Victoria Residence" />
+          </div>
+          <div className="form-group">
+            <label>Address</label>
+            <input
+              value={bizAddress}
+              onChange={(e) => setBizAddress(e.target.value)}
+              placeholder="123 Sample St., Barangay, City"
+            />
+          </div>
+          <div className="form-group">
+            <label>Contact number / email</label>
+            <input
+              value={bizContact}
+              onChange={(e) => setBizContact(e.target.value)}
+              placeholder="0917 000 0000 · victoria@email.com"
+            />
+          </div>
+          <button className="btn btn-primary" onClick={handleSaveOrg} disabled={savingOrg}>
+            {savingOrg ? 'Saving…' : 'Save organization details'}
+          </button>
         </div>
       )}
 

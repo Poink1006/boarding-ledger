@@ -858,3 +858,92 @@ input[type='number']::-webkit-inner-spin-button {
     padding: 16px 16px 84px;
   }
 }
+
+/* ---- Printable documents (receipts + statements) ---- */
+.doc-overlay {
+  align-items: flex-start;
+}
+.doc-shell {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.doc-print-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.doc-sheet {
+  background: #ffffff;
+  color: #1a1a1a;
+  border-radius: 8px;
+  padding: 34px 38px;
+  font-family: 'Inter', sans-serif;
+  box-shadow: var(--shadow);
+}
+.doc-sheet h1 {
+  font-family: 'Fraunces', serif;
+  font-size: 19px;
+  margin: 0;
+  color: #1a1a1a;
+}
+.doc-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: #666;
+  text-transform: uppercase;
+}
+.doc-hr {
+  border: none;
+  border-top: 1px solid #e2e2e2;
+  margin: 16px 0;
+}
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.doc-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #666;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+  border-bottom: 1px solid #e2e2e2;
+}
+.doc-table td {
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+.doc-muted {
+  color: #777;
+}
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .doc-sheet,
+  .doc-sheet * {
+    visibility: visible;
+  }
+  .doc-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+  }
+  .doc-print-toolbar {
+    display: none !important;
+  }
+}

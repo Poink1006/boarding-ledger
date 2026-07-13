@@ -5,6 +5,9 @@
 
 create extension if not exists "pgcrypto";
 
+-- never-resetting counter for payment receipt numbers
+create sequence if not exists public.receipt_seq;
+
 -- ----------------------------------------------------------------------------
 -- profiles: one row per auth user, carries the role used by every RLS policy
 -- ----------------------------------------------------------------------------
@@ -84,6 +87,10 @@ create table public.app_settings (
   -- current occupants — see src/lib/balance.ts
   electricity_allowance_per_tenant numeric(10,2) not null default 500,
   water_allowance_per_tenant numeric(10,2) not null default 200,
+  -- organization header details printed on receipts and statements
+  business_name text not null default 'Victoria Residence',
+  business_address text,
+  business_contact text,
   updated_at timestamptz not null default now(),
   updated_by uuid references public.profiles(id),
   constraint app_settings_singleton check (id)
@@ -301,6 +308,7 @@ create table public.payments (
   payment_type text not null default 'rent' check (payment_type in ('rent', 'utility')),
   date_paid date not null default current_date,
   notes text,
+  receipt_no bigint default nextval('public.receipt_seq'),  -- stable sequential receipt number, assigned at creation
   deleted_at timestamptz,                        -- soft delete: set = archived, null = live
   created_at timestamptz not null default now(),
   created_by uuid references public.profiles(id),
