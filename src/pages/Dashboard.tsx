@@ -52,8 +52,8 @@ export function Dashboard() {
         await Promise.all([
           supabase.from('apartments').select('*'),
           supabase.from('rooms').select('*'),
-          supabase.from('tenants').select('*'),
-          supabase.from('payments').select('*'),
+          supabase.from('tenants').select('*').is('deleted_at', null),
+          supabase.from('payments').select('*').is('deleted_at', null),
           supabase.from('utility_bills').select('*'),
           supabase.from('app_settings').select('*').single(),
           supabase.from('tenant_rate_changes').select('*'),

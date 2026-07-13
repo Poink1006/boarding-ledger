@@ -89,7 +89,8 @@ interface TenantsData {
   apartments: Apartment[]
   rooms: Room[]
   settings: AppSettings | null
-  tenants: Tenant[]
+  tenants: Tenant[]           // live (not archived) — used everywhere
+  archivedTenants: Tenant[]   // soft-deleted, shown only in the Archived view
   payments: Payment[]
   utilityBills: UtilityBill[]
   priceGroups: RoomPriceGroup[]
@@ -105,6 +106,7 @@ export function Tenants() {
   const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
   const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
   const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [archivedTenants, setArchivedTenants] = useState<Tenant[]>(cached?.archivedTenants ?? [])
   const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
   const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
   const [priceGroups, setPriceGroups] = useState<RoomPriceGroup[]>(cached?.priceGroups ?? [])
@@ -112,7 +114,9 @@ export function Tenants() {
   const [loading, setLoading] = useState(!cached)
 
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'current' | 'pending' | 'active' | 'inactive' | 'all'>('current')
+  const [statusFilter, setStatusFilter] = useState<'current' | 'pending' | 'active' | 'inactive' | 'all' | 'archived'>(
+    'current',
+  )
   const [apartmentFilter, setApartmentFilter] = useState('')
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
   const [depositModal, setDepositModal] = useState<DepositModalState>(null)
@@ -128,7 +132,7 @@ export function Tenants() {
           supabase.from('rooms').select('*'),
           supabase.from('app_settings').select('*').single(),
           supabase.from('tenants').select('*'),
-          supabase.from('payments').select('*'),
+          supabase.from('payments').select('*').is('deleted_at', null),
           supabase.from('utility_bills').select('*'),
           supabase.from('room_price_groups').select('*'),
           supabase.from('tenant_rate_changes').select('*'),
@@ -142,11 +146,13 @@ export function Tenants() {
       if (priceGroupsRes.error) showToast(priceGroupsRes.error.message)
       if (rateHistoryRes.error) showToast(rateHistoryRes.error.message)
 
+      const allTenants = [...(tenantsRes.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
       const data: TenantsData = {
         apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
         rooms: [...(roomsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.label, b.label)),
         settings: settingsRes.data ?? null,
-        tenants: [...(tenantsRes.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+        tenants: allTenants.filter((t) => t.deleted_at == null),
+        archivedTenants: allTenants.filter((t) => t.deleted_at != null),
         payments: paymentsRes.data ?? [],
         utilityBills: utilityBillsRes.data ?? [],
         priceGroups: priceGroupsRes.data ?? [],
@@ -157,6 +163,7 @@ export function Tenants() {
       setRooms(data.rooms)
       setSettings(data.settings)
       setTenants(data.tenants)
+      setArchivedTenants(data.archivedTenants)
       setPayments(data.payments)
       setUtilityBills(data.utilityBills)
       setPriceGroups(data.priceGroups)
@@ -217,19 +224,34 @@ export function Tenants() {
     loadAll(true)
   }
 
-  async function deleteTenant(tenant: Tenant) {
+  // soft delete: the tenant is archived (hidden everywhere) but their records
+  // and payment history survive and can be restored from the Archived view
+  async function archiveTenant(tenant: Tenant) {
     if (
       !window.confirm(
-        `Permanently delete ${tenant.first_name} ${tenant.last_name} and their payment history? This cannot be undone.`,
+        `Archive ${tenant.first_name} ${tenant.last_name}? They'll disappear from all lists, but their records are kept and an admin can restore them later.`,
       )
     )
       return
-    const { error } = await supabase.from('tenants').delete().eq('id', tenant.id)
+    const { error } = await supabase
+      .from('tenants')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', tenant.id)
     if (error) {
       showToast(error.message)
       return
     }
-    showToast('Tenant deleted.')
+    showToast('Tenant archived.')
+    loadAll(true)
+  }
+
+  async function restoreTenant(tenant: Tenant) {
+    const { error } = await supabase.from('tenants').update({ deleted_at: null }).eq('id', tenant.id)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast(`${tenant.first_name} ${tenant.last_name} restored.`)
     loadAll(true)
   }
 
@@ -246,7 +268,8 @@ export function Tenants() {
     )
   }
 
-  const filtered = tenants.filter((t) => {
+  const source = statusFilter === 'archived' ? archivedTenants : tenants
+  const filtered = source.filter((t) => {
     if (statusFilter === 'current' && t.status === 'inactive') return false
     if (statusFilter === 'pending' && t.status !== 'pending') return false
     if (statusFilter === 'active' && t.status !== 'active') return false
@@ -291,6 +314,7 @@ export function Tenants() {
           <option value="active">Active</option>
           <option value="inactive">Moved out</option>
           <option value="all">All</option>
+          {isAdmin && <option value="archived">Archived</option>}
         </select>
         <select value={apartmentFilter} onChange={(e) => setApartmentFilter(e.target.value)}>
           <option value="">All apartments</option>
@@ -381,34 +405,47 @@ export function Tenants() {
                       )}
                     </td>
                     <td>
-                      <ActionMenu
-                        items={[
-                          { label: 'Edit', onClick: () => setTenantModal({ mode: 'edit', tenant: t }) },
-                          {
-                            label: 'Security Deposit',
-                            onClick: () => setDepositModal({ tenant: t }),
-                            hidden: t.deposit_amount <= 0,
-                          },
-                          {
-                            label: '+ Add Security Deposit',
-                            onClick: () => setAddDepositModal({ tenant: t }),
-                            hidden: t.deposit_amount > 0,
-                          },
-                          { label: 'Move', onClick: () => setMoveModal({ tenant: t }), hidden: t.status === 'inactive' },
-                          {
-                            label: t.status === 'pending' ? 'Cancel' : 'Move out',
-                            onClick: () => moveOutTenant(t),
-                            danger: true,
-                            hidden: t.status === 'inactive',
-                          },
-                          {
-                            label: 'Delete',
-                            onClick: () => deleteTenant(t),
-                            danger: true,
-                            hidden: t.status !== 'inactive' || !isAdmin,
-                          },
-                        ]}
-                      />
+                      {t.deleted_at != null ? (
+                        <ActionMenu
+                          items={[
+                            {
+                              label: 'Restore',
+                              onClick: () => restoreTenant(t),
+                              primary: true,
+                              hidden: !isAdmin,
+                            },
+                          ]}
+                        />
+                      ) : (
+                        <ActionMenu
+                          items={[
+                            { label: 'Edit', onClick: () => setTenantModal({ mode: 'edit', tenant: t }) },
+                            {
+                              label: 'Security Deposit',
+                              onClick: () => setDepositModal({ tenant: t }),
+                              hidden: t.deposit_amount <= 0,
+                            },
+                            {
+                              label: '+ Add Security Deposit',
+                              onClick: () => setAddDepositModal({ tenant: t }),
+                              hidden: t.deposit_amount > 0,
+                            },
+                            { label: 'Move', onClick: () => setMoveModal({ tenant: t }), hidden: t.status === 'inactive' },
+                            {
+                              label: t.status === 'pending' ? 'Cancel' : 'Move out',
+                              onClick: () => moveOutTenant(t),
+                              danger: true,
+                              hidden: t.status === 'inactive',
+                            },
+                            {
+                              label: 'Archive',
+                              onClick: () => archiveTenant(t),
+                              danger: true,
+                              hidden: t.status !== 'inactive' || !isAdmin,
+                            },
+                          ]}
+                        />
+                      )}
                     </td>
                   </tr>
                 )

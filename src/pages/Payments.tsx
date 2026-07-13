@@ -68,10 +68,10 @@ export function Payments() {
       if (!silent) setLoading(true)
       const [tenantsRes, apartmentsRes, roomsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
         await Promise.all([
-          supabase.from('tenants').select('*'),
+          supabase.from('tenants').select('*').is('deleted_at', null),
           supabase.from('apartments').select('*'),
           supabase.from('rooms').select('*'),
-          supabase.from('payments').select('*'),
+          supabase.from('payments').select('*').is('deleted_at', null),
           supabase.from('utility_bills').select('*'),
           supabase.from('app_settings').select('*').single(),
           supabase.from('tenant_rate_changes').select('*'),
@@ -111,14 +111,19 @@ export function Payments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll])
 
+  // soft delete: the payment stops counting toward the balance but the record
+  // survives (recoverable via the database / visible in the audit log)
   async function deletePayment(payment: Payment) {
-    if (!window.confirm('Delete this payment? This will reduce the tenant’s balance.')) return
-    const { error } = await supabase.from('payments').delete().eq('id', payment.id)
+    if (!window.confirm('Remove this payment? This will reduce the tenant’s balance. The record is archived, not destroyed.')) return
+    const { error } = await supabase
+      .from('payments')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', payment.id)
     if (error) {
       showToast(error.message)
       return
     }
-    showToast('Payment deleted.')
+    showToast('Payment removed.')
     loadAll(true)
   }
 

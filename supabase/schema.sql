@@ -227,6 +227,8 @@ create table public.tenants (
   deposit_returned_date date,
   deposit_notes text,
 
+  deleted_at timestamptz,                        -- soft delete: set = archived, null = live
+
   created_at timestamptz not null default now(),
   created_by uuid references public.profiles(id),
   updated_at timestamptz not null default now()
@@ -299,6 +301,7 @@ create table public.payments (
   payment_type text not null default 'rent' check (payment_type in ('rent', 'utility')),
   date_paid date not null default current_date,
   notes text,
+  deleted_at timestamptz,                        -- soft delete: set = archived, null = live
   created_at timestamptz not null default now(),
   created_by uuid references public.profiles(id),
   updated_at timestamptz not null default now()
@@ -463,3 +466,65 @@ create trigger audit_room_price_groups
 create trigger audit_app_settings
   after insert or update or delete on public.app_settings
   for each row execute function public.audit_trigger();
+
+-- ----------------------------------------------------------------------------
+-- column-level permission enforcement for non-admins (see
+-- supabase/migrations/012_permissions_softdelete.sql for rationale)
+-- ----------------------------------------------------------------------------
+create or replace function public.enforce_tenant_permissions()
+returns trigger
+language plpgsql
+as $$
+begin
+  if public.is_admin() then
+    return new;
+  end if;
+
+  if new.first_name is distinct from old.first_name
+     or new.last_name is distinct from old.last_name
+     or new.tenant_number is distinct from old.tenant_number then
+    raise exception 'Only an admin can change a tenant''s name or number.';
+  end if;
+
+  if new.custom_rate_per_pax is distinct from old.custom_rate_per_pax then
+    raise exception 'Only an admin can change a tenant''s custom rate.';
+  end if;
+
+  if new.monthly_rate is distinct from old.monthly_rate
+     and new.room_id is not distinct from old.room_id then
+    raise exception 'Only an admin can change a tenant''s monthly rate.';
+  end if;
+
+  if new.deposit_amount is distinct from old.deposit_amount
+     and old.deposit_amount <> 0 then
+    raise exception 'Only an admin can change an existing security deposit amount.';
+  end if;
+
+  if new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Only an admin can archive or restore a tenant.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger tenants_enforce_permissions
+  before update on public.tenants
+  for each row execute function public.enforce_tenant_permissions();
+
+create or replace function public.enforce_payment_permissions()
+returns trigger
+language plpgsql
+as $$
+begin
+  if not public.is_admin()
+     and new.deleted_at is distinct from old.deleted_at then
+    raise exception 'Only an admin can archive or restore a payment.';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger payments_enforce_permissions
+  before update on public.payments
+  for each row execute function public.enforce_payment_permissions();

@@ -77,6 +77,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // auto-logout after 30 minutes of inactivity — a shared front-desk computer
+  // left unattended shouldn't stay signed in forever. Any mouse/keyboard/touch
+  // activity resets the clock; a once-a-minute check signs out when it lapses.
+  useEffect(() => {
+    if (!session) return
+    const INACTIVITY_LIMIT_MS = 30 * 60 * 1000
+    let lastActivity = Date.now()
+    const bump = () => {
+      lastActivity = Date.now()
+    }
+    const events: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel']
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }))
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivity >= INACTIVITY_LIMIT_MS) {
+        supabase.auth.signOut()
+      }
+    }, 60 * 1000)
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, bump))
+      clearInterval(interval)
+    }
+  }, [session])
+
   async function signIn(email: string, password: string) {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return { error: error?.message ?? null }

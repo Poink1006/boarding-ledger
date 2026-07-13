@@ -141,7 +141,7 @@ export function Settings() {
         supabase.from('app_settings').select('*').single(),
         supabase.from('apartments').select('*'),
         supabase.from('rooms').select('*'),
-        supabase.from('tenants').select('*'),
+        supabase.from('tenants').select('*').is('deleted_at', null),
         supabase.from('room_price_groups').select('*'),
       ])
       if (settingsRes.error) showToast(settingsRes.error.message)

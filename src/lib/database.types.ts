@@ -181,6 +181,7 @@ export interface Database {
           deposit_returned_amount: number | null
           deposit_returned_date: string | null
           deposit_notes: string | null
+          deleted_at: string | null
           created_at: string
           created_by: string | null
           updated_at: string
@@ -215,6 +216,7 @@ export interface Database {
           deposit_returned_amount?: number | null
           deposit_returned_date?: string | null
           deposit_notes?: string | null
+          deleted_at?: string | null
           created_at?: string
           created_by?: string | null
           updated_at?: string
@@ -249,6 +251,7 @@ export interface Database {
           deposit_returned_amount?: number | null
           deposit_returned_date?: string | null
           deposit_notes?: string | null
+          deleted_at?: string | null
           created_at?: string
           created_by?: string | null
           updated_at?: string
@@ -290,6 +293,7 @@ export interface Database {
           payment_type: PaymentType
           date_paid: string
           notes: string | null
+          deleted_at: string | null
           created_at: string
           created_by: string | null
           updated_at: string
@@ -301,6 +305,7 @@ export interface Database {
           payment_type?: PaymentType
           date_paid?: string
           notes?: string | null
+          deleted_at?: string | null
           created_at?: string
           created_by?: string | null
           updated_at?: string
@@ -312,6 +317,7 @@ export interface Database {
           payment_type?: PaymentType
           date_paid?: string
           notes?: string | null
+          deleted_at?: string | null
           created_at?: string
           created_by?: string | null
           updated_at?: string

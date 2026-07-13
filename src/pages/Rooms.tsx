@@ -53,7 +53,7 @@ export function Rooms() {
         supabase.from('apartments').select('*'),
         supabase.from('rooms').select('*'),
         supabase.from('app_settings').select('*').single(),
-        supabase.from('tenants').select('*'),
+        supabase.from('tenants').select('*').is('deleted_at', null),
         supabase.from('room_price_groups').select('*'),
       ])
       if (apartmentsRes.error) showToast(apartmentsRes.error.message)
