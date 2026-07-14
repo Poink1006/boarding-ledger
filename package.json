@@ -1,7 +1,7 @@
 {
   "name": "boarding-ledger",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Victoria Residence — dormitory / boarding house management desktop app",
   "author": "Victoria Residence",
   "scripts": {
