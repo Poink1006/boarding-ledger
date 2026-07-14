@@ -7,6 +7,7 @@ import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtDate } from '../lib/format'
 import { getCached, setCached, hasCached } from '../lib/cache'
 import { SkeletonBlock, SkeletonTable } from '../components/Skeleton'
+import { exportAllData, daysSinceLastBackup, getLastBackupAt, BACKUP_STALE_DAYS } from '../lib/backup'
 import type { Database } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'utilities', label: 'Utility allowances' },
   { id: 'overrides', label: 'Custom overrides' },
   { id: 'organization', label: 'Organization' },
+  { id: 'backup', label: 'Backup' },
   { id: 'activity', label: 'Activity log' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -127,6 +129,24 @@ export function Settings() {
   // audit log is fetched on demand when the Activity log tab is opened
   const [auditLog, setAuditLog] = useState<AuditRow[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
+
+  const [exporting, setExporting] = useState(false)
+  // bump on each export so the "last backup" line refreshes without a reload
+  const [backupTick, setBackupTick] = useState(0)
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const { counts, filename } = await exportAllData()
+      const total = Object.values(counts).reduce((s, n) => s + n, 0)
+      showToast(`Backup saved: ${filename} (${total} records).`)
+      setBackupTick((t) => t + 1)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Backup failed.')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const loadAudit = useCallback(async () => {
     setAuditLoading(true)
@@ -541,6 +561,15 @@ export function Settings() {
         </div>
       )}
 
+      {activeTab === 'backup' && (
+        <BackupPanel
+          exporting={exporting}
+          onExport={handleExport}
+          // backupTick forces this to re-read the stored timestamp after an export
+          key={backupTick}
+        />
+      )}
+
       {activeTab === 'activity' && (
         <>
           <div className="page-head" style={{ marginBottom: 12 }}>
@@ -608,6 +637,52 @@ export function Settings() {
         />
       )}
     </>
+  )
+}
+
+function BackupPanel({ exporting, onExport }: { exporting: boolean; onExport: () => void }) {
+  const lastAt = getLastBackupAt()
+  const days = daysSinceLastBackup()
+  const stale = days == null || days >= BACKUP_STALE_DAYS
+
+  return (
+    <div className="table-wrap" style={{ padding: '20px 24px', maxWidth: 560 }}>
+      <p className="hint" style={{ marginBottom: 16 }}>
+        Your tenant, payment, and billing records live in one online database. This saves a complete
+        copy to a file on this computer — keep it somewhere safe (a USB drive or Google Drive) so you
+        can recover everything if that database is ever lost or damaged.
+      </p>
+
+      {stale && (
+        <div
+          className="hint"
+          style={{
+            marginBottom: 16,
+            padding: '10px 14px',
+            borderRadius: 8,
+            background: 'var(--hover-tint, rgba(0,0,0,0.04))',
+            borderLeft: '3px solid var(--clay, #b5654a)',
+          }}
+        >
+          {days == null
+            ? "You haven't saved a backup from this computer yet. It's a good idea to do one now."
+            : `It's been ${days} day(s) since your last backup on this computer. Consider saving a fresh one.`}
+        </div>
+      )}
+
+      <button className="btn btn-primary" onClick={onExport} disabled={exporting}>
+        {exporting ? 'Preparing backup…' : 'Export all data'}
+      </button>
+
+      <div className="hint" style={{ marginTop: 12 }}>
+        {lastAt
+          ? `Last backup from this computer: ${fmtDateTime(lastAt)}.`
+          : 'No backup has been saved from this computer yet.'}
+        <br />
+        The file is a complete snapshot (including archived records) and can be used to restore the
+        database. It contains tenant and payment details, so store it privately.
+      </div>
+    </div>
   )
 }
 
