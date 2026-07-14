@@ -251,6 +251,25 @@ describe('per-tenant utility overage', () => {
     expect(b.utilityCharges[0]).toMatchObject({ type: 'electricity', amount: 500, status: 'unpaid' })
   })
 
+  it('rounds an uneven split to whole centavos (no repeating decimals)', () => {
+    const t1 = makeTenant({ id: 's1', room_id: 'R1', move_in_date: '2026-01-15', status: 'active' })
+    const t2 = makeTenant({ id: 's2', room_id: 'R1', move_in_date: '2026-01-15', status: 'active' })
+    const t3 = makeTenant({ id: 's3', room_id: 'R1', move_in_date: '2026-01-15', status: 'active' })
+    const ctx: UtilityBalanceContext = {
+      rooms: [room],
+      tenants: [t1, t2, t3], // headcount 3
+      // electricity 2500; allowance 500 * 3 = 1500; excess 1000; 1000/3 = 333.3333…
+      utilityBills: [makeBill({ apartment_id: 'A1', utility_type: 'electricity', total_cost: 2500 })],
+      settings: makeSettings(),
+    }
+    const b = computeTenantBalance(t1, [], [], ctx)
+    expect(b.utilityDue).toBe(333.33) // rounded to centavos, not 333.3333…
+    // paying exactly the shown charge must clear the tenant's utility balance
+    const paid = computeTenantBalance(t1, [makePayment({ tenant_id: 's1', amount: 333.33, payment_type: 'utility' })], [], ctx)
+    expect(paid.utilityBalance).toBe(0)
+    expect(paid.utilityCharges[0].status).toBe('paid')
+  })
+
   it('charges nothing when a bill is within the allowance', () => {
     const t1 = makeTenant({ id: 'u3', room_id: 'R1', move_in_date: '2026-01-15', status: 'active' })
     const ctx: UtilityBalanceContext = {

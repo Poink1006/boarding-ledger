@@ -1,5 +1,6 @@
 import { addMonths, todayStr, dateToMonthInput } from './format'
 import { occupiesBed } from './tenantStatus'
+import { roundCentavos } from './money'
 import type { Database } from './database.types'
 
 type Tenant = Database['public']['Tables']['tenants']['Row']
@@ -91,7 +92,9 @@ function computeUtilityShares(
         : ctx.settings.water_allowance_per_tenant) * headcount
     const excess = Math.max(0, bill.total_cost - allowance)
     if (excess <= 0) continue
-    shares.push({ month: bill.billing_month, type: bill.utility_type, amount: excess / headcount })
+    // round each occupant's share to whole centavos so the charge is a clean,
+    // payable amount and repeated shares don't drift when summed month over month
+    shares.push({ month: bill.billing_month, type: bill.utility_type, amount: roundCentavos(excess / headcount) })
   }
   shares.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.type < b.type ? -1 : 1))
   return shares

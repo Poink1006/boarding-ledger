@@ -1,5 +1,7 @@
 export function fmtMoney(n: number) {
-  return '₱' + Number(n || 0).toLocaleString('en-PH')
+  // cap at 2 decimals (centavos) so a split utility share like 333.3333 renders
+  // as ₱333.33, not ₱333.333; whole amounts still show clean (₱5,000)
+  return '₱' + Number(n || 0).toLocaleString('en-PH', { maximumFractionDigits: 2 })
 }
 
 export function fmtDate(s: string | null) {
