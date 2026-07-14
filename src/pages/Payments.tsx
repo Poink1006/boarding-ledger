@@ -23,7 +23,7 @@ type RateChange = Database['public']['Tables']['tenant_rate_changes']['Row']
 type PaymentModalState = { tenantId: string; initial: Payment | null; defaultType: PaymentType } | null
 type HistoryModalState = { tenant: Tenant } | null
 type ReceiptModalState = { tenant: Tenant; payment: Payment } | null
-type StatementModalState = { tenant: Tenant } | null
+type StatementModalState = { tenant: Tenant; type: PaymentType } | null
 
 function BalanceBadge({ value, zeroLabel = 'Paid up' }: { value: number; zeroLabel?: string }) {
   if (value < 0) return <span className="badge badge-overdue">Owes {fmtMoney(-value)}</span>
@@ -245,6 +245,7 @@ export function Payments() {
             <thead>
               {activeTab === 'rent' ? (
                 <tr>
+                  <th>Tenant No.</th>
                   <th>Tenant</th>
                   <th>Room</th>
                   <th>Monthly Rate</th>
@@ -254,6 +255,7 @@ export function Payments() {
                 </tr>
               ) : (
                 <tr>
+                  <th>Tenant No.</th>
                   <th>Tenant</th>
                   <th>Room</th>
                   <th>Utility Due</th>
@@ -268,6 +270,7 @@ export function Payments() {
                 const room = rooms.find((r) => r.id === tenant.room_id)
                 return (
                   <tr key={tenant.id}>
+                    <td className="mono">{tenant.tenant_number}</td>
                     <td>
                       <div className="name-cell">
                         {tenant.first_name} {tenant.last_name}
@@ -309,8 +312,11 @@ export function Payments() {
                         <button className="btn btn-ghost btn-sm" onClick={() => setHistoryModal({ tenant })}>
                           History
                         </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => setStatementModal({ tenant })}>
-                          Statement
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setStatementModal({ tenant, type: activeTab })}
+                        >
+                          {activeTab === 'utility' ? 'Utility statement' : 'Rent statement'}
                         </button>
                       </div>
                     </td>
@@ -376,6 +382,7 @@ export function Payments() {
             room={rooms.find((r) => r.id === statementModal.tenant.room_id)}
             balance={computeTenantBalance(statementModal.tenant, payments, rateHistory, utilityContext)}
             payments={payments.filter((p) => p.tenant_id === statementModal.tenant.id)}
+            type={statementModal.type}
           />
         </PrintModal>
       )}

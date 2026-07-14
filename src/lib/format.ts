@@ -11,6 +11,15 @@ export function fmtDate(s: string | null) {
   })
 }
 
+// month + year only, e.g. "Jul 2026"
+export function fmtMonth(s: string | null) {
+  if (!s) return '—'
+  return new Date(s + 'T00:00:00').toLocaleDateString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+  })
+}
+
 // numeric m/d/yyyy form, e.g. 7/9/2026
 export function fmtDateShort(s: string | null) {
   if (!s) return '—'

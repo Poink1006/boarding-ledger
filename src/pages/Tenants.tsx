@@ -44,11 +44,11 @@ function firstVacantBedIndex(effCap: number, occupied: Set<number>) {
   return null
 }
 
+// Tenant numbers are "YY-NNN" — 2-digit year of application, then a running
+// count within that year, e.g. 26-001.
 function previewTenantNumber(dateApplied: string, tenants: Tenant[]) {
   const d = dateApplied ? new Date(dateApplied + 'T00:00:00') : new Date()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yy = String(d.getFullYear()).slice(-2)
-  const prefix = `${mm}${yy}`
+  const prefix = String(d.getFullYear()).slice(-2)
   const count = tenants.filter((t) => t.tenant_number.startsWith(prefix + '-')).length
   return `${prefix}-${String(count + 1).padStart(3, '0')}`
 }
@@ -59,9 +59,7 @@ async function insertTenantWithRetry(
   tenantsSnapshot: Tenant[],
 ) {
   const d = dateApplied ? new Date(dateApplied + 'T00:00:00') : new Date()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yy = String(d.getFullYear()).slice(-2)
-  const prefix = `${mm}${yy}`
+  const prefix = String(d.getFullYear()).slice(-2)
   const existingSeqs = new Set(
     tenantsSnapshot
       .filter((t) => t.tenant_number.startsWith(prefix + '-'))

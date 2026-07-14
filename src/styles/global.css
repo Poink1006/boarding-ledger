@@ -875,6 +875,24 @@ input[type='number']::-webkit-inner-spin-button {
   justify-content: flex-end;
   gap: 8px;
 }
+/* the toolbar sits on the dark modal backdrop, so give both buttons solid,
+   high-contrast surfaces instead of the default ghost styling */
+.doc-print-toolbar .btn-ghost {
+  background: var(--paper-card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.doc-print-toolbar .btn-ghost:hover {
+  background: var(--paper-alt);
+}
+.doc-print-toolbar .btn-primary {
+  background: var(--brass);
+  color: var(--ink);
+  border: 1px solid var(--brass);
+}
+.doc-print-toolbar .btn-primary:hover {
+  opacity: 0.9;
+}
 .doc-sheet {
   background: #ffffff;
   color: #1a1a1a;

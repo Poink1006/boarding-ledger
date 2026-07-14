@@ -1,6 +1,6 @@
-import { fmtMoney, fmtDate, todayStr } from '../lib/format'
+import { fmtMoney, fmtDate, fmtMonth, todayStr } from '../lib/format'
 import type { computeTenantBalance } from '../lib/balance'
-import type { Database } from '../lib/database.types'
+import type { Database, PaymentType } from '../lib/database.types'
 
 type Tenant = Database['public']['Tables']['tenants']['Row']
 type Room = Database['public']['Tables']['rooms']['Row']
@@ -137,22 +137,31 @@ export function StatementDoc({
   room,
   balance,
   payments,
+  type,
 }: {
   settings: AppSettings | null
   tenant: Tenant
   room: Room | undefined
   balance: Balance
   payments: Payment[]
+  type: PaymentType
 }) {
-  const totalDue = -(balance.rentBalance < 0 ? balance.rentBalance : 0) - (balance.utilityBalance < 0 ? balance.utilityBalance : 0)
-  const tenantPayments = [...payments].sort((a, b) => (a.date_paid < b.date_paid ? 1 : -1))
+  const isUtility = type === 'utility'
+  const charged = isUtility ? balance.utilityDue : balance.rentDue
+  const paid = isUtility ? balance.utilityPaid : balance.rentPaid
+  const bal = isUtility ? balance.utilityBalance : balance.rentBalance
+  const totalDue = bal < 0 ? -bal : 0
+  const typePayments = payments
+    .filter((p) => p.payment_type === type)
+    .sort((a, b) => (a.date_paid < b.date_paid ? 1 : -1))
+
   return (
     <>
       <DocHeader
         settings={settings}
         right={
           <>
-            <div className="doc-title">Statement of Account</div>
+            <div className="doc-title">Statement of Account · {isUtility ? 'Utilities' : 'Rent'}</div>
             <div className="doc-muted" style={{ fontSize: 12, marginTop: 2 }}>as of {fmtDate(todayStr())}</div>
           </>
         }
@@ -162,8 +171,36 @@ export function StatementDoc({
       </div>
       <hr className="doc-hr" />
 
-      <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', marginBottom: 4 }}>RENT</div>
-      {balance.cycles.length === 0 ? (
+      {isUtility ? (
+        balance.utilityCharges.length === 0 ? (
+          <div className="doc-muted" style={{ fontSize: 13, marginBottom: 10 }}>No utility charges yet.</div>
+        ) : (
+          <table className="doc-table" style={{ marginBottom: 8 }}>
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>Utility</th>
+                <th style={{ textAlign: 'right' }}>Charge</th>
+                <th style={{ textAlign: 'right' }}>Paid</th>
+                <th style={{ textAlign: 'right' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balance.utilityCharges.map((c, i) => (
+                <tr key={i}>
+                  <td>{fmtMonth(c.month)}</td>
+                  <td>{c.type === 'electricity' ? 'Electricity' : 'Water'}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.amount)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.appliedAmount)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {c.status === 'paid' ? 'Paid' : c.status === 'partial' ? 'Partial' : 'Unpaid'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      ) : balance.cycles.length === 0 ? (
         <div className="doc-muted" style={{ fontSize: 13, marginBottom: 10 }}>No rent billing cycles yet.</div>
       ) : (
         <table className="doc-table" style={{ marginBottom: 8 }}>
@@ -189,24 +226,14 @@ export function StatementDoc({
           </tbody>
         </table>
       )}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, fontSize: 13 }}>
-        <span className="doc-muted">Rent charged {fmtMoney(balance.rentDue)}</span>
-        <span className="doc-muted">Paid {fmtMoney(balance.rentPaid)}</span>
-        <span style={{ fontWeight: 600 }}>{balanceLabel(balance.rentBalance)}</span>
+        <span className="doc-muted">Charged {fmtMoney(charged)}</span>
+        <span className="doc-muted">Paid {fmtMoney(paid)}</span>
+        <span style={{ fontWeight: 600 }}>{balanceLabel(bal)}</span>
       </div>
 
-      <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', margin: '16px 0 4px' }}>UTILITIES</div>
-      {balance.utilityDue === 0 && balance.utilityPaid === 0 ? (
-        <div className="doc-muted" style={{ fontSize: 13 }}>No utility charges.</div>
-      ) : (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, fontSize: 13 }}>
-          <span className="doc-muted">Charged {fmtMoney(balance.utilityDue)}</span>
-          <span className="doc-muted">Paid {fmtMoney(balance.utilityPaid)}</span>
-          <span style={{ fontWeight: 600 }}>{balanceLabel(balance.utilityBalance)}</span>
-        </div>
-      )}
-
-      {tenantPayments.length > 0 && (
+      {typePayments.length > 0 && (
         <>
           <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', margin: '16px 0 4px' }}>
             PAYMENTS RECEIVED
@@ -216,16 +243,14 @@ export function StatementDoc({
               <tr>
                 <th>Receipt</th>
                 <th>Date</th>
-                <th>For</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
               </tr>
             </thead>
             <tbody>
-              {tenantPayments.map((p) => (
+              {typePayments.map((p) => (
                 <tr key={p.id}>
                   <td style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{formatReceiptNo(p.receipt_no)}</td>
                   <td>{fmtDate(p.date_paid)}</td>
-                  <td>{p.payment_type === 'utility' ? 'Utility' : 'Rent'}</td>
                   <td style={{ textAlign: 'right' }}>{fmtMoney(p.amount)}</td>
                 </tr>
               ))}
@@ -236,7 +261,7 @@ export function StatementDoc({
 
       <hr className="doc-hr" />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontWeight: 600 }}>Total amount due</span>
+        <span style={{ fontWeight: 600 }}>Total {isUtility ? 'utility' : 'rent'} due</span>
         <span style={{ fontSize: 20, fontWeight: 600, color: totalDue > 0 ? '#a32d2d' : '#0f6e56' }}>
           {totalDue > 0 ? fmtMoney(totalDue) : 'Paid up'}
         </span>

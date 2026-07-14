@@ -18,6 +18,14 @@ export interface BillingCycle {
   status: 'paid' | 'partial' | 'unpaid'
 }
 
+export interface UtilityCharge {
+  month: string // billing_month (a date)
+  type: 'electricity' | 'water'
+  amount: number // this tenant's share of the overage
+  appliedAmount: number
+  status: 'paid' | 'partial' | 'unpaid'
+}
+
 export interface TenantBalance {
   // rent and utilities are independent pools — a rent top-up never covers a
   // utility charge or vice versa
@@ -33,6 +41,7 @@ export interface TenantBalance {
   cyclesBilled: number
   nextDueDate: string | null
   cycles: BillingCycle[]
+  utilityCharges: UtilityCharge[] // per-month utility overage share for this tenant
 }
 
 export interface UtilityBalanceContext {
@@ -54,18 +63,23 @@ function apartmentHeadcount(apartmentId: string, ctx: UtilityBalanceContext) {
 // Each tenant's rent is assumed to cover an allowance per utility. Any
 // apartment bill beyond (allowance * current headcount) is split evenly
 // across the apartment's current occupants and added to what each owes.
-function computeUtilityDue(tenant: Tenant, ctx: UtilityBalanceContext): number {
-  if (!tenant.room_id || !ctx.settings) return 0
+// Returns one entry per relevant utility bill (this tenant's share), oldest
+// month first, so a per-month statement can list them.
+function computeUtilityShares(
+  tenant: Tenant,
+  ctx: UtilityBalanceContext,
+): { month: string; type: 'electricity' | 'water'; amount: number }[] {
+  if (!tenant.room_id || !ctx.settings) return []
   const room = ctx.rooms.find((r) => r.id === tenant.room_id)
-  if (!room) return 0
+  if (!room) return []
   const headcount = apartmentHeadcount(room.apartment_id, ctx)
-  if (headcount === 0) return 0
+  if (headcount === 0) return []
 
   const cutoff = tenant.status === 'inactive' && tenant.move_out_date ? tenant.move_out_date : todayStr()
   const cutoffMonth = dateToMonthInput(cutoff)
   const startMonth = tenant.move_in_date ? dateToMonthInput(tenant.move_in_date) : null
 
-  let due = 0
+  const shares: { month: string; type: 'electricity' | 'water'; amount: number }[] = []
   for (const bill of ctx.utilityBills) {
     if (bill.apartment_id !== room.apartment_id) continue
     const billMonth = dateToMonthInput(bill.billing_month)
@@ -76,9 +90,11 @@ function computeUtilityDue(tenant: Tenant, ctx: UtilityBalanceContext): number {
         ? ctx.settings.electricity_allowance_per_tenant
         : ctx.settings.water_allowance_per_tenant) * headcount
     const excess = Math.max(0, bill.total_cost - allowance)
-    due += excess / headcount
+    if (excess <= 0) continue
+    shares.push({ month: bill.billing_month, type: bill.utility_type, amount: excess / headcount })
   }
-  return due
+  shares.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : a.type < b.type ? -1 : 1))
+  return shares
 }
 
 // The rate in effect for a cycle anchored on `anchorDate` — the most recent
@@ -114,8 +130,19 @@ export function computeTenantBalance(
     .reduce((sum, p) => sum + Number(p.amount || 0), 0)
   const totalPaid = rentPaid + utilityPaid
 
-  const utilityDue = utilityContext ? computeUtilityDue(tenant, utilityContext) : 0
+  // per-month utility shares, then FIFO-allocate utility payments across them
+  // (oldest month first) to give each a paid/partial/unpaid status
+  const rawShares = utilityContext ? computeUtilityShares(tenant, utilityContext) : []
+  const utilityDue = rawShares.reduce((s, c) => s + c.amount, 0)
   const utilityBalance = utilityPaid - utilityDue
+  let remainingUtilityPaid = utilityPaid
+  const utilityCharges: UtilityCharge[] = rawShares.map((c) => {
+    const appliedAmount = Math.max(0, Math.min(c.amount, remainingUtilityPaid))
+    remainingUtilityPaid -= appliedAmount
+    const status: UtilityCharge['status'] =
+      appliedAmount >= c.amount ? 'paid' : appliedAmount > 0 ? 'partial' : 'unpaid'
+    return { month: c.month, type: c.type, amount: c.amount, appliedAmount, status }
+  })
 
   if (!tenant.move_in_date) {
     return {
@@ -131,6 +158,7 @@ export function computeTenantBalance(
       cyclesBilled: 0,
       nextDueDate: null,
       cycles: [],
+      utilityCharges,
     }
   }
 
@@ -172,5 +200,6 @@ export function computeTenantBalance(
     cyclesBilled: index,
     nextDueDate,
     cycles,
+    utilityCharges,
   }
 }
