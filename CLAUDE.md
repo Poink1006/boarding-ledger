@@ -10,12 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev              # Vite dev server + Electron (hot reload) — port 5173
-npm run build            # tsc -b && vite build  (also the typecheck — there is no separate typecheck/lint/test script)
+npm run build            # tsc -b && vite build  (this is also the typecheck; there is no separate lint step)
+npm test                 # Vitest run (unit tests, e.g. src/lib/balance.test.ts)
+npm run test:watch       # Vitest in watch mode
 npm run electron:build   # build + package installer locally (no publish)
 npm run electron:release # build + package + publish to GitHub Releases (needs GH_TOKEN)
 ```
 
-- **Typecheck = `npm run build`** (`tsc -b`). There is no test suite, linter, or standalone typecheck command.
+- **Typecheck = `npm run build`** (`tsc -b`); there is no separate lint step.
+- **Tests** run under Vitest (`npm test`). The money core (`src/lib/balance.ts`) has a
+  suite in `src/lib/balance.test.ts` — clock is frozen with `vi.setSystemTime` so cycle
+  counts stay deterministic. Add to it before changing billing logic.
 - **Publishing a release** requires a GitHub token. `gh auth token` is not available in the installed gh version — read the token inline without printing it:
   ```bash
   GH_TOKEN=$(grep -m1 'oauth_token:' "$APPDATA/GitHub CLI/hosts.yml" | sed 's/.*oauth_token:[[:space:]]*//') npm run electron:release
