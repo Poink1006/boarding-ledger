@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
@@ -30,9 +31,16 @@ interface DashboardData {
   rateHistory: RateChange[]
 }
 
+// how many rent cycles a tenant hasn't fully covered — a plain-language sense of
+// how far behind they are, counting partials as behind
+function rentMonthsBehind(b: ReturnType<typeof computeTenantBalance>) {
+  return b.cycles.filter((c) => c.status !== 'paid').length
+}
+
 export function Dashboard() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
+  const navigate = useNavigate()
 
   const cached = getCached<DashboardData>(CACHE_KEY)
   const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
@@ -123,9 +131,14 @@ export function Dashboard() {
   const collectedThisMonth = paymentsThisMonth.reduce((s, p) => s + Number(p.amount || 0), 0)
 
   const utilityContext = { rooms, tenants, utilityBills, settings }
-  const balances = occupyingTenants.map((t) => computeTenantBalance(t, payments, rateHistory, utilityContext))
-  const lowBalanceCount = balances.filter((b) => b.balance < 0).length
-  const totalOwed = balances.reduce((s, b) => (b.balance < 0 ? s - b.balance : s), 0)
+  const balancePairs = occupyingTenants.map((t) => ({ tenant: t, balance: computeTenantBalance(t, payments, rateHistory, utilityContext) }))
+  const lowBalanceCount = balancePairs.filter((p) => p.balance.balance < 0).length
+  const totalOwed = balancePairs.reduce((s, p) => (p.balance.balance < 0 ? s - p.balance.balance : s), 0)
+
+  // tenants who owe money, most owed first — the daily "who to chase" worklist
+  const arrears = balancePairs
+    .filter((p) => p.balance.balance < 0)
+    .sort((a, b) => a.balance.balance - b.balance.balance)
 
   const occupancyByRoom: Record<string, number> = {}
   for (const t of occupyingTenants) {
@@ -186,6 +199,65 @@ export function Dashboard() {
           <div className="stat-note">{totalOwed > 0 ? `${fmtMoney(totalOwed)} total owed` : 'all caught up'}</div>
         </div>
       </div>
+
+      {arrears.length > 0 && (
+        <>
+          <div className="section-title">
+            Needs attention · {arrears.length} tenant{arrears.length === 1 ? '' : 's'} behind
+          </div>
+          <div className="table-wrap" style={{ marginBottom: 28 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tenant No.</th>
+                  <th>Tenant</th>
+                  <th>Room</th>
+                  <th>Behind</th>
+                  <th>Rent owed</th>
+                  <th>Utility owed</th>
+                  <th>Total owed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {arrears.map(({ tenant, balance }) => {
+                  const room = rooms.find((r) => r.id === tenant.room_id)
+                  const rentOwed = balance.rentBalance < 0 ? -balance.rentBalance : 0
+                  const utilityOwed = balance.utilityBalance < 0 ? -balance.utilityBalance : 0
+                  const behind = rentMonthsBehind(balance)
+                  return (
+                    <tr
+                      key={tenant.id}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate('/payments')}
+                      title="Open Payments to log a payment"
+                    >
+                      <td className="mono">{tenant.tenant_number}</td>
+                      <td className="name-cell">
+                        {tenant.first_name} {tenant.last_name}
+                      </td>
+                      <td className="mono">{room ? room.label : '—'}</td>
+                      <td>
+                        {behind > 0 ? (
+                          <span className="badge badge-overdue">
+                            {behind} mo{behind === 1 ? '' : 's'}
+                          </span>
+                        ) : (
+                          <span className="sub-cell">utilities only</span>
+                        )}
+                      </td>
+                      <td>{rentOwed > 0 ? fmtMoney(rentOwed) : <span className="sub-cell">—</span>}</td>
+                      <td>{utilityOwed > 0 ? fmtMoney(utilityOwed) : <span className="sub-cell">—</span>}</td>
+                      <td>
+                        <span className="badge badge-overdue">{fmtMoney(-balance.balance)}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <div className="section-title">Occupancy by apartment</div>
       {apartments.length === 0 ? (
