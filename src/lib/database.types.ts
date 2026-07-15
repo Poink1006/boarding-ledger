@@ -43,6 +43,7 @@ export interface Database {
           business_name: string
           business_address: string | null
           business_contact: string | null
+          payment_instructions: string | null
           updated_at: string
           updated_by: string | null
         }
@@ -55,6 +56,7 @@ export interface Database {
           business_name?: string
           business_address?: string | null
           business_contact?: string | null
+          payment_instructions?: string | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -67,6 +69,7 @@ export interface Database {
           business_name?: string
           business_address?: string | null
           business_contact?: string | null
+          payment_instructions?: string | null
           updated_at?: string
           updated_by?: string | null
         }

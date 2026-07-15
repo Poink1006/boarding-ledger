@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { effectiveCapacity, naturalSort } from '../lib/rooms'
 import { computeTenantBalance } from '../lib/balance'
+import { buildReminder, reminderMailto } from '../lib/reminder'
 import { fmtMoney, todayStr } from '../lib/format'
 import { TENANT_STATUS_LABEL, TENANT_STATUS_BADGE, occupiesBed } from '../lib/tenantStatus'
 import { Modal } from '../components/Modal'
@@ -52,6 +53,7 @@ export function Dashboard() {
   const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
   const [loading, setLoading] = useState(!cached)
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
+  const [reminderFor, setReminderFor] = useState<{ tenant: Tenant; balance: ReturnType<typeof computeTenantBalance> } | null>(null)
 
   const loadAll = useCallback(
     async (silent: boolean) => {
@@ -216,6 +218,7 @@ export function Dashboard() {
                   <th>Rent owed</th>
                   <th>Utility owed</th>
                   <th>Total owed</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -249,6 +252,11 @@ export function Dashboard() {
                       <td>{utilityOwed > 0 ? fmtMoney(utilityOwed) : <span className="sub-cell">—</span>}</td>
                       <td>
                         <span className="badge badge-overdue">{fmtMoney(-balance.balance)}</span>
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setReminderFor({ tenant, balance })}>
+                          Remind
+                        </button>
                       </td>
                     </tr>
                   )
@@ -337,6 +345,86 @@ export function Dashboard() {
           )}
         </Modal>
       )}
+
+      {reminderFor && (
+        <ReminderModal
+          tenant={reminderFor.tenant}
+          balance={reminderFor.balance}
+          settings={settings}
+          onClose={() => setReminderFor(null)}
+        />
+      )}
     </>
+  )
+}
+
+function ReminderModal({
+  tenant,
+  balance,
+  settings,
+  onClose,
+}: {
+  tenant: Tenant
+  balance: ReturnType<typeof computeTenantBalance>
+  settings: AppSettings | null
+  onClose: () => void
+}) {
+  const { showToast } = useToast()
+  const initial = buildReminder(tenant, balance, settings)
+  // editable so the operator can tweak wording before sending
+  const [body, setBody] = useState(initial.body)
+  const mailto = reminderMailto(tenant.email, { subject: initial.subject, body })
+
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(body)
+      showToast('Reminder copied to clipboard.')
+    } catch {
+      showToast('Could not copy — select the text and copy manually.')
+    }
+  }
+
+  return (
+    <Modal
+      title={`Remind ${tenant.first_name} ${tenant.last_name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn btn-ghost" onClick={copyMessage}>
+            Copy message
+          </button>
+          {mailto ? (
+            <a className="btn btn-primary" href={mailto}>
+              Open in email
+            </a>
+          ) : (
+            <button className="btn btn-primary" disabled title="No email on file for this tenant">
+              Open in email
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="form-group">
+        <label>To</label>
+        <input value={tenant.email ?? ''} disabled placeholder="No email on file — use Copy message instead" />
+      </div>
+      <div className="form-group">
+        <label>Subject</label>
+        <input value={initial.subject} disabled />
+      </div>
+      <div className="form-group">
+        <label>Message</label>
+        <textarea rows={12} value={body} onChange={(e) => setBody(e.target.value)} />
+        <div className="hint">
+          {mailto
+            ? 'Opens your email app with this message ready to send — review and hit send there.'
+            : 'This tenant has no email on file. Add one on the Tenants page, or use Copy message to paste it elsewhere.'}
+        </div>
+      </div>
+    </Modal>
   )
 }

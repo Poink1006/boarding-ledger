@@ -124,6 +124,7 @@ export function Settings() {
   const [bizName, setBizName] = useState(cached?.settings?.business_name ?? '')
   const [bizAddress, setBizAddress] = useState(cached?.settings?.business_address ?? '')
   const [bizContact, setBizContact] = useState(cached?.settings?.business_contact ?? '')
+  const [bizPayInstructions, setBizPayInstructions] = useState(cached?.settings?.payment_instructions ?? '')
   const [savingOrg, setSavingOrg] = useState(false)
 
   // audit log is fetched on demand when the Activity log tab is opened
@@ -199,6 +200,7 @@ export function Settings() {
       setBizName(data.settings?.business_name ?? '')
       setBizAddress(data.settings?.business_address ?? '')
       setBizContact(data.settings?.business_contact ?? '')
+      setBizPayInstructions(data.settings?.payment_instructions ?? '')
       setApartments(data.apartments)
       setRooms(data.rooms)
       setTenants(data.tenants)
@@ -280,6 +282,7 @@ export function Settings() {
         business_name: bizName.trim(),
         business_address: bizAddress.trim() || null,
         business_contact: bizContact.trim() || null,
+        payment_instructions: bizPayInstructions.trim() || null,
         updated_by: profile?.id,
       })
       .eq('id', true)
@@ -554,6 +557,16 @@ export function Settings() {
               onChange={(e) => setBizContact(e.target.value)}
               placeholder="0917 000 0000 · victoria@email.com"
             />
+          </div>
+          <div className="form-group">
+            <label>Payment instructions</label>
+            <textarea
+              rows={3}
+              value={bizPayInstructions}
+              onChange={(e) => setBizPayInstructions(e.target.value)}
+              placeholder="e.g. GCash: 0917 000 0000 (Juan D.) · or BPI 1234-5678-90"
+            />
+            <div className="hint">Included in the rent reminders you send tenants, so they know where to pay.</div>
           </div>
           <button className="btn btn-primary" onClick={handleSaveOrg} disabled={savingOrg}>
             {savingOrg ? 'Saving…' : 'Save organization details'}
