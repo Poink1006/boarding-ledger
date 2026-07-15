@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
@@ -151,13 +150,10 @@ export function Expenses() {
   const manualTotal = monthExpenses.reduce((s, e) => s + Number(e.amount || 0), 0)
   const grandTotal = manualTotal + utilitiesTotal
 
-  // income = payments actually collected this month (cash basis), split by type
-  const monthPayments = payments.filter((p) => p.date_paid.slice(0, 7) === month)
-  const rentCollected = monthPayments.filter((p) => p.payment_type === 'rent').reduce((s, p) => s + Number(p.amount || 0), 0)
-  const utilityCollected = monthPayments
-    .filter((p) => p.payment_type === 'utility')
+  // income = payments actually collected this month (cash basis)
+  const totalIncome = payments
+    .filter((p) => p.date_paid.slice(0, 7) === month)
     .reduce((s, p) => s + Number(p.amount || 0), 0)
-  const totalIncome = rentCollected + utilityCollected
   const netIncome = totalIncome - grandTotal
 
   return (
@@ -211,56 +207,14 @@ export function Expenses() {
             monthLabel={fmtMonth(monthInputToDate(month))}
           />
 
-          <div className="section-title">Income · {fmtMonth(monthInputToDate(month))}</div>
-          <div className="table-wrap" style={{ maxWidth: 560, marginBottom: 24 }}>
-            <table>
-              <tbody>
-                <tr>
-                  <td>Rent collected</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(rentCollected)}</td>
-                </tr>
-                <tr>
-                  <td>Utility collected</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(utilityCollected)}</td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td style={{ fontWeight: 600 }}>Total income</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(totalIncome)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          <div className="section-title">Expenses · {fmtMonth(monthInputToDate(month))}</div>
-          <div className="table-wrap" style={{ maxWidth: 560 }}>
-            <table>
-              <tbody>
-                {categoryTotals.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.label}</td>
-                    <td style={{ textAlign: 'right' }}>{fmtMoney(c.total)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>
-                    Apartment utilities{' '}
-                    <Link to="/utilities" className="hint" style={{ textDecoration: 'underline' }}>
-                      (from Utilities)
-                    </Link>
-                  </td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(utilitiesTotal)}</td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td style={{ fontWeight: 600 }}>Total expenses</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(grandTotal)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+          <div className="section-title">Expense breakdown · {fmtMonth(monthInputToDate(month))}</div>
+          <ExpensePieChart
+            slices={[
+              ...categoryTotals.map((c) => ({ label: c.label, value: c.total })),
+              { label: 'Apartment utilities', value: utilitiesTotal },
+            ]}
+            total={grandTotal}
+          />
         </>
       ) : (
         <CategoryEntries
@@ -343,6 +297,69 @@ function MonthPLChart({
         <div style={{ fontSize: 24, fontWeight: 600, color: net < 0 ? 'var(--clay)' : 'var(--sage)' }}>
           {net < 0 ? `-${fmtMoney(-net)}` : fmtMoney(net)}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// distinct earthy tones for the pie slices, in category order
+const PIE_COLORS = ['#b98a3d', '#5f7f5c', '#a64b3c', '#7a6a55', '#4a5d57']
+
+// Pie chart of the month's expenses by category, with a legend showing each
+// slice's share of the total. Inline SVG (no chart library). Zero-value
+// categories are dropped so the legend only lists what was actually spent.
+function ExpensePieChart({ slices, total }: { slices: { label: string; value: number }[]; total: number }) {
+  const data = slices
+    .map((s, i) => ({ ...s, color: PIE_COLORS[i % PIE_COLORS.length] }))
+    .filter((s) => s.value > 0)
+
+  if (total <= 0 || data.length === 0) {
+    return (
+      <div className="table-wrap" style={{ maxWidth: 560, padding: '18px 20px' }}>
+        <div className="hint">No expenses recorded for this month yet.</div>
+      </div>
+    )
+  }
+
+  const cx = 90
+  const cy = 90
+  const r = 84
+  const point = (a: number) => [cx + r * Math.cos(a), cy + r * Math.sin(a)]
+
+  let angle = -Math.PI / 2 // start at 12 o'clock
+  const wedges = data.map((s) => {
+    const frac = s.value / total
+    const start = angle
+    const end = angle + frac * Math.PI * 2
+    angle = end
+    const [x1, y1] = point(start)
+    const [x2, y2] = point(end)
+    const large = end - start > Math.PI ? 1 : 0
+    const path = `M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`
+    return { ...s, frac, path }
+  })
+
+  return (
+    <div
+      className="table-wrap"
+      style={{ maxWidth: 560, padding: 20, display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}
+    >
+      <svg viewBox="0 0 180 180" width="170" height="170" role="img" aria-label="Expense breakdown by category">
+        {wedges.length === 1 ? (
+          <circle cx={cx} cy={cy} r={r} fill={wedges[0].color} />
+        ) : (
+          wedges.map((w, i) => <path key={i} d={w.path} fill={w.color} />)
+        )}
+      </svg>
+      <div style={{ flex: 1, minWidth: 220 }}>
+        {wedges.map((w, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0' }}>
+            <span style={{ width: 12, height: 12, borderRadius: 3, background: w.color, flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>{w.label}</span>
+            <span style={{ fontWeight: 600, minWidth: 42, textAlign: 'right' }}>{Math.round(w.frac * 100)}%</span>
+            <span className="sub-cell" style={{ minWidth: 84, textAlign: 'right' }}>{fmtMoney(w.value)}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
