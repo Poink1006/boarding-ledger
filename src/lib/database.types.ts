@@ -8,6 +8,7 @@ export type TenantStatus = 'pending' | 'active' | 'inactive'
 export type DepositStatus = 'unpaid' | 'held' | 'refunded'
 export type UtilityType = 'water' | 'electricity'
 export type PaymentType = 'rent' | 'utility'
+export type ExpenseCategory = 'salary' | 'internet' | 'cleaning' | 'miscellaneous'
 
 export interface Database {
   public: {
@@ -372,6 +373,45 @@ export interface Database {
           usage?: number
           total_cost?: number
           notes?: string | null
+          created_at?: string
+          created_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      expenses: {
+        Row: {
+          id: string
+          category: ExpenseCategory
+          label: string | null
+          amount: number
+          expense_month: string
+          notes: string | null
+          deleted_at: string | null
+          created_at: string
+          created_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          category: ExpenseCategory
+          label?: string | null
+          amount: number
+          expense_month: string
+          notes?: string | null
+          deleted_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          category?: ExpenseCategory
+          label?: string | null
+          amount?: number
+          expense_month?: string
+          notes?: string | null
+          deleted_at?: string | null
           created_at?: string
           created_by?: string | null
           updated_at?: string

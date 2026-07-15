@@ -10,6 +10,7 @@ import { Rooms } from './pages/Rooms'
 import { Tenants } from './pages/Tenants'
 import { Payments } from './pages/Payments'
 import { Utilities } from './pages/Utilities'
+import { Expenses } from './pages/Expenses'
 import { Settings } from './pages/Settings'
 import { Unauthorized } from './pages/Unauthorized'
 
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="/utilities" element={<Utilities />} />
 
               <Route element={<AdminRoute />}>
+                <Route path="/expenses" element={<Expenses />} />
                 <Route path="/settings" element={<Settings />} />
               </Route>
             </Route>

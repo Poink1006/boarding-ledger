@@ -35,6 +35,13 @@ export function Layout() {
         ))}
 
         {isAdmin && (
+          <NavLink to="/expenses" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <span className="nav-icon">⊖</span>
+            <span className="nav-label">Expenses</span>
+          </NavLink>
+        )}
+
+        {isAdmin && (
           <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
             <span className="nav-icon">⚙</span>
             <span className="nav-label">Settings</span>
