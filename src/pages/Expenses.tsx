@@ -11,6 +11,7 @@ import type { Database, ExpenseCategory } from '../lib/database.types'
 
 type Expense = Database['public']['Tables']['expenses']['Row']
 type UtilityBill = Database['public']['Tables']['utility_bills']['Row']
+type Payment = Database['public']['Tables']['payments']['Row']
 
 // display order + labels for the fixed category set
 const CATEGORIES: { id: ExpenseCategory; label: string }[] = [
@@ -48,6 +49,7 @@ const CACHE_KEY = 'expenses'
 interface ExpensesData {
   expenses: Expense[]
   utilityBills: UtilityBill[]
+  payments: Payment[]
 }
 
 export function Expenses() {
@@ -57,6 +59,7 @@ export function Expenses() {
   const cached = getCached<ExpensesData>(CACHE_KEY)
   const [expenses, setExpenses] = useState<Expense[]>(cached?.expenses ?? [])
   const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
+  const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
   const [loading, setLoading] = useState(!cached)
 
   const currentMonth = todayStr().slice(0, 7)
@@ -67,19 +70,23 @@ export function Expenses() {
   const loadAll = useCallback(
     async (silent: boolean) => {
       if (!silent) setLoading(true)
-      const [expensesRes, utilityBillsRes] = await Promise.all([
+      const [expensesRes, utilityBillsRes, paymentsRes] = await Promise.all([
         supabase.from('expenses').select('*').is('deleted_at', null),
         supabase.from('utility_bills').select('*'),
+        supabase.from('payments').select('*').is('deleted_at', null),
       ])
       if (expensesRes.error) showToast(expensesRes.error.message)
       if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
+      if (paymentsRes.error) showToast(paymentsRes.error.message)
       const data: ExpensesData = {
         expenses: expensesRes.data ?? [],
         utilityBills: utilityBillsRes.data ?? [],
+        payments: paymentsRes.data ?? [],
       }
       setCached(CACHE_KEY, data)
       setExpenses(data.expenses)
       setUtilityBills(data.utilityBills)
+      setPayments(data.payments)
       setLoading(false)
     },
     [showToast],
@@ -144,6 +151,15 @@ export function Expenses() {
   const manualTotal = monthExpenses.reduce((s, e) => s + Number(e.amount || 0), 0)
   const grandTotal = manualTotal + utilitiesTotal
 
+  // income = payments actually collected this month (cash basis), split by type
+  const monthPayments = payments.filter((p) => p.date_paid.slice(0, 7) === month)
+  const rentCollected = monthPayments.filter((p) => p.payment_type === 'rent').reduce((s, p) => s + Number(p.amount || 0), 0)
+  const utilityCollected = monthPayments
+    .filter((p) => p.payment_type === 'utility')
+    .reduce((s, p) => s + Number(p.amount || 0), 0)
+  const totalIncome = rentCollected + utilityCollected
+  const netIncome = totalIncome - grandTotal
+
   return (
     <>
       <div className="page-head">
@@ -186,40 +202,79 @@ export function Expenses() {
       </div>
 
       {activeTab === 'summary' ? (
-        // category subtotals + the live utilities line + grand total
-        <div className="table-wrap" style={{ maxWidth: 560 }}>
-          <table>
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th style={{ textAlign: 'right' }}>Total · {fmtMonth(monthInputToDate(month))}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categoryTotals.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.label}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.total)}</td>
+        <>
+          {/* headline P&L for the month: what came in, what went out, what's left */}
+          <div className="stat-grid" style={{ marginBottom: 24 }}>
+            <div className="stat-card">
+              <div className="stat-label">Income collected</div>
+              <div className="stat-value sage">{fmtMoney(totalIncome)}</div>
+              <div className="stat-note">rent + utility payments</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Total expenses</div>
+              <div className="stat-value">{fmtMoney(grandTotal)}</div>
+              <div className="stat-note">incl. apartment utilities</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Net income</div>
+              <div className={`stat-value ${netIncome < 0 ? 'clay' : 'sage'}`}>
+                {netIncome < 0 ? `-${fmtMoney(-netIncome)}` : fmtMoney(netIncome)}
+              </div>
+              <div className="stat-note">{fmtMonth(monthInputToDate(month))}</div>
+            </div>
+          </div>
+
+          <div className="section-title">Income · {fmtMonth(monthInputToDate(month))}</div>
+          <div className="table-wrap" style={{ maxWidth: 560, marginBottom: 24 }}>
+            <table>
+              <tbody>
+                <tr>
+                  <td>Rent collected</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(rentCollected)}</td>
                 </tr>
-              ))}
-              <tr>
-                <td>
-                  Apartment utilities{' '}
-                  <Link to="/utilities" className="hint" style={{ textDecoration: 'underline' }}>
-                    (from Utilities)
-                  </Link>
-                </td>
-                <td style={{ textAlign: 'right' }}>{fmtMoney(utilitiesTotal)}</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr>
-                <td style={{ fontWeight: 600 }}>Total this month</td>
-                <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(grandTotal)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+                <tr>
+                  <td>Utility collected</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(utilityCollected)}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td style={{ fontWeight: 600 }}>Total income</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(totalIncome)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className="section-title">Expenses · {fmtMonth(monthInputToDate(month))}</div>
+          <div className="table-wrap" style={{ maxWidth: 560 }}>
+            <table>
+              <tbody>
+                {categoryTotals.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.label}</td>
+                    <td style={{ textAlign: 'right' }}>{fmtMoney(c.total)}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td>
+                    Apartment utilities{' '}
+                    <Link to="/utilities" className="hint" style={{ textDecoration: 'underline' }}>
+                      (from Utilities)
+                    </Link>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(utilitiesTotal)}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td style={{ fontWeight: 600 }}>Total expenses</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(grandTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </>
       ) : (
         <CategoryEntries
           category={activeTab}
