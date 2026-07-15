@@ -203,26 +203,13 @@ export function Expenses() {
 
       {activeTab === 'summary' ? (
         <>
-          {/* headline P&L for the month: what came in, what went out, what's left */}
-          <div className="stat-grid" style={{ marginBottom: 24 }}>
-            <div className="stat-card">
-              <div className="stat-label">Income collected</div>
-              <div className="stat-value sage">{fmtMoney(totalIncome)}</div>
-              <div className="stat-note">rent + utility payments</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Total expenses</div>
-              <div className="stat-value">{fmtMoney(grandTotal)}</div>
-              <div className="stat-note">incl. apartment utilities</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Net income</div>
-              <div className={`stat-value ${netIncome < 0 ? 'clay' : 'sage'}`}>
-                {netIncome < 0 ? `-${fmtMoney(-netIncome)}` : fmtMoney(netIncome)}
-              </div>
-              <div className="stat-note">{fmtMonth(monthInputToDate(month))}</div>
-            </div>
-          </div>
+          {/* headline P&L for the month: what came in vs. what went out, net below */}
+          <MonthPLChart
+            income={totalIncome}
+            expenses={grandTotal}
+            net={netIncome}
+            monthLabel={fmtMonth(monthInputToDate(month))}
+          />
 
           <div className="section-title">Income · {fmtMonth(monthInputToDate(month))}</div>
           <div className="table-wrap" style={{ maxWidth: 560, marginBottom: 24 }}>
@@ -300,6 +287,64 @@ export function Expenses() {
         />
       )}
     </>
+  )
+}
+
+// Income-vs-expenses bar chart for the month, with net income labeled below.
+// Inline SVG (no chart library) using the app's own color tokens so it stays
+// consistent with the rest of the UI. Bars scale to the larger of the two.
+function MonthPLChart({
+  income,
+  expenses,
+  net,
+  monthLabel,
+}: {
+  income: number
+  expenses: number
+  net: number
+  monthLabel: string
+}) {
+  const W = 340
+  const H = 210
+  const top = 34
+  const baseline = 168
+  const maxH = baseline - top
+  const max = Math.max(income, expenses, 1)
+  const barW = 84
+  const incomeX = 58
+  const expenseX = 198
+  const incomeH = (income / max) * maxH
+  const expenseH = (expenses / max) * maxH
+
+  return (
+    <div className="table-wrap" style={{ maxWidth: 420, padding: '18px 20px 14px', marginBottom: 24 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`Income ${income}, expenses ${expenses}, net ${net}`}>
+        <line x1={20} y1={baseline} x2={W - 20} y2={baseline} stroke="var(--line)" />
+
+        <rect x={incomeX} y={baseline - incomeH} width={barW} height={incomeH} rx={5} fill="var(--sage)" />
+        <text x={incomeX + barW / 2} y={baseline - incomeH - 8} textAnchor="middle" fontSize="12.5" fontWeight="600" fill="var(--ink)">
+          {fmtMoney(income)}
+        </text>
+        <text x={incomeX + barW / 2} y={baseline + 18} textAnchor="middle" fontSize="12" fill="var(--ink-soft)">
+          Income
+        </text>
+
+        <rect x={expenseX} y={baseline - expenseH} width={barW} height={expenseH} rx={5} fill="var(--clay)" />
+        <text x={expenseX + barW / 2} y={baseline - expenseH - 8} textAnchor="middle" fontSize="12.5" fontWeight="600" fill="var(--ink)">
+          {fmtMoney(expenses)}
+        </text>
+        <text x={expenseX + barW / 2} y={baseline + 18} textAnchor="middle" fontSize="12" fill="var(--ink-soft)">
+          Expenses
+        </text>
+      </svg>
+
+      <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <div className="stat-label">Net income · {monthLabel}</div>
+        <div style={{ fontSize: 24, fontWeight: 600, color: net < 0 ? 'var(--clay)' : 'var(--sage)' }}>
+          {net < 0 ? `-${fmtMoney(-net)}` : fmtMoney(net)}
+        </div>
+      </div>
+    </div>
   )
 }
 
