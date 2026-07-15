@@ -40,7 +40,9 @@ function monthsUpToNow(earliest: string, current: string): string[] {
   return out
 }
 
-type ExpenseModalState = { initial: Expense | null } | null
+type ExpenseModalState = { initial: Expense | null; defaultCategory: ExpenseCategory } | null
+type TabId = 'summary' | ExpenseCategory
+const TABS: { id: TabId; label: string }[] = [{ id: 'summary', label: 'Summary' }, ...CATEGORIES]
 
 const CACHE_KEY = 'expenses'
 interface ExpensesData {
@@ -59,6 +61,7 @@ export function Expenses() {
 
   const currentMonth = todayStr().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
+  const [activeTab, setActiveTab] = useState<TabId>('summary')
   const [modal, setModal] = useState<ExpenseModalState>(null)
 
   const loadAll = useCallback(
@@ -148,12 +151,18 @@ export function Expenses() {
           <h2>Expenses</h2>
           <div className="page-sub">Money going out — salaries, internet, supplies, and apartment utilities</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ initial: null })}>
+        <button
+          className="btn btn-primary"
+          onClick={() => setModal({ initial: null, defaultCategory: activeTab === 'summary' ? 'salary' : activeTab })}
+        >
           + Add expense
         </button>
       </div>
 
       <div className="toolbar">
+        <label className="hint" style={{ alignSelf: 'center' }}>
+          Month
+        </label>
         <select value={month} onChange={(e) => setMonth(e.target.value)}>
           {monthOptions.map((m) => (
             <option key={m} value={m}>
@@ -163,88 +172,70 @@ export function Expenses() {
         </select>
       </div>
 
-      {/* month summary: category subtotals + the live utilities line + grand total */}
-      <div className="table-wrap" style={{ marginBottom: 28, maxWidth: 560 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th style={{ textAlign: 'right' }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {categoryTotals.map((c) => (
-              <tr key={c.id}>
-                <td>{c.label}</td>
-                <td style={{ textAlign: 'right' }}>{fmtMoney(c.total)}</td>
-              </tr>
-            ))}
-            <tr>
-              <td>
-                Apartment utilities{' '}
-                <Link to="/utilities" className="hint" style={{ textDecoration: 'underline' }}>
-                  (from Utilities)
-                </Link>
-              </td>
-              <td style={{ textAlign: 'right' }}>{fmtMoney(utilitiesTotal)}</td>
-            </tr>
-          </tbody>
-          <tfoot>
-            <tr>
-              <td style={{ fontWeight: 600 }}>Total this month</td>
-              <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(grandTotal)}</td>
-            </tr>
-          </tfoot>
-        </table>
+      <div className="tab-bar">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`tab-item${activeTab === tab.id ? ' active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="section-title">Entries · {fmtMonth(monthInputToDate(month))}</div>
-      <div className="table-wrap">
-        {monthExpenses.length === 0 ? (
-          <div className="empty-state">
-            <h3>No expenses logged for this month</h3>
-            <p>Add salaries, internet, cleaning materials, or other costs. Apartment utilities are pulled in automatically above.</p>
-          </div>
-        ) : (
+      {activeTab === 'summary' ? (
+        // category subtotals + the live utilities line + grand total
+        <div className="table-wrap" style={{ maxWidth: 560 }}>
           <table>
             <thead>
               <tr>
                 <th>Category</th>
-                <th>Description</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
-                <th></th>
+                <th style={{ textAlign: 'right' }}>Total · {fmtMonth(monthInputToDate(month))}</th>
               </tr>
             </thead>
             <tbody>
-              {monthExpenses.map((e) => (
-                <tr key={e.id}>
-                  <td>{CATEGORY_LABEL[e.category]}</td>
-                  <td>
-                    {e.label || <span className="sub-cell">—</span>}
-                    {e.notes && <div className="sub-cell">{e.notes}</div>}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(e.amount)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setModal({ initial: e })}>
-                        Edit
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => deleteExpense(e)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
+              {categoryTotals.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.label}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.total)}</td>
                 </tr>
               ))}
+              <tr>
+                <td>
+                  Apartment utilities{' '}
+                  <Link to="/utilities" className="hint" style={{ textDecoration: 'underline' }}>
+                    (from Utilities)
+                  </Link>
+                </td>
+                <td style={{ textAlign: 'right' }}>{fmtMoney(utilitiesTotal)}</td>
+              </tr>
             </tbody>
+            <tfoot>
+              <tr>
+                <td style={{ fontWeight: 600 }}>Total this month</td>
+                <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(grandTotal)}</td>
+              </tr>
+            </tfoot>
           </table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <CategoryEntries
+          category={activeTab}
+          entries={monthExpenses.filter((e) => e.category === activeTab)}
+          month={month}
+          onEdit={(e) => setModal({ initial: e, defaultCategory: activeTab })}
+          onDelete={deleteExpense}
+          onAdd={() => setModal({ initial: null, defaultCategory: activeTab })}
+        />
+      )}
 
       {modal && (
         <ExpenseModal
           initial={modal.initial}
           defaultMonth={month}
+          defaultCategory={modal.defaultCategory}
           createdBy={profile?.id ?? null}
           onClose={() => setModal(null)}
           onSaved={() => {
@@ -257,22 +248,94 @@ export function Expenses() {
   )
 }
 
+function CategoryEntries({
+  category,
+  entries,
+  month,
+  onEdit,
+  onDelete,
+  onAdd,
+}: {
+  category: ExpenseCategory
+  entries: Expense[]
+  month: string
+  onEdit: (e: Expense) => void
+  onDelete: (e: Expense) => void
+  onAdd: () => void
+}) {
+  const total = entries.reduce((s, e) => s + Number(e.amount || 0), 0)
+  return (
+    <div className="table-wrap">
+      {entries.length === 0 ? (
+        <div className="empty-state">
+          <h3>No {CATEGORY_LABEL[category].toLowerCase()} logged for {fmtMonth(monthInputToDate(month))}</h3>
+          <p>
+            <button className="btn btn-primary btn-sm" onClick={onAdd}>
+              + Add {CATEGORY_LABEL[category].toLowerCase()}
+            </button>
+          </p>
+        </div>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th style={{ textAlign: 'right' }}>Amount</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.id}>
+                <td>
+                  {e.label || <span className="sub-cell">—</span>}
+                  {e.notes && <div className="sub-cell">{e.notes}</div>}
+                </td>
+                <td style={{ textAlign: 'right' }}>{fmtMoney(e.amount)}</td>
+                <td>
+                  <div className="row-actions">
+                    <button className="btn btn-ghost btn-sm" onClick={() => onEdit(e)}>
+                      Edit
+                    </button>
+                    <button className="btn btn-danger btn-sm" onClick={() => onDelete(e)}>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td style={{ fontWeight: 600 }}>{CATEGORY_LABEL[category]} total</td>
+              <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(total)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
+    </div>
+  )
+}
+
 function ExpenseModal({
   initial,
   defaultMonth,
+  defaultCategory,
   createdBy,
   onClose,
   onSaved,
 }: {
   initial: Expense | null
   defaultMonth: string
+  defaultCategory: ExpenseCategory
   createdBy: string | null
   onClose: () => void
   onSaved: () => void
 }) {
   const { showToast } = useToast()
 
-  const [category, setCategory] = useState<ExpenseCategory>(initial?.category ?? 'salary')
+  const [category, setCategory] = useState<ExpenseCategory>(initial?.category ?? defaultCategory)
   const [label, setLabel] = useState(initial?.label ?? '')
   const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : '')
   const [month, setMonth] = useState(initial ? initial.expense_month.slice(0, 7) : defaultMonth)
