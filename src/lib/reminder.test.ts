@@ -8,7 +8,7 @@ type AppSettings = Database['public']['Tables']['app_settings']['Row']
 type Balance = ReturnType<typeof computeTenantBalance>
 
 function tenant(over: Partial<Tenant> = {}): Tenant {
-  return { first_name: 'Maria', last_name: 'Santos', email: 'maria@example.com', ...(over as Tenant) } as Tenant
+  return { first_name: 'Maria', last_name: 'Santos', email: 'maria@example.com', ...over } as Tenant
 }
 
 // only the fields buildReminder reads need to be real
@@ -17,7 +17,7 @@ function balance(over: Partial<Balance>): Balance {
 }
 
 function settings(over: Partial<AppSettings> = {}): AppSettings {
-  return { business_name: 'Victoria Residence', payment_instructions: null, ...(over as AppSettings) } as AppSettings
+  return { business_name: 'Victoria Residence', payment_instructions: null, ...over } as AppSettings
 }
 
 describe('buildReminder', () => {
