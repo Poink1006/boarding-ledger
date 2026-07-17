@@ -418,6 +418,36 @@ export interface Database {
         }
         Relationships: []
       }
+      error_log: {
+        Row: {
+          id: string
+          message: string
+          stack: string | null
+          context: string | null
+          user_id: string | null
+          user_name: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          message: string
+          stack?: string | null
+          context?: string | null
+          user_id?: string | null
+          user_name?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          message?: string
+          stack?: string | null
+          context?: string | null
+          user_id?: string | null
+          user_name?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       schema_migrations: {
         Row: {
           version: string

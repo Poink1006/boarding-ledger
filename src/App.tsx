@@ -1,9 +1,12 @@
+import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute'
 import { Layout } from './components/Layout'
 import { UpdateBanner } from './components/UpdateBanner'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { logError } from './lib/errorLog'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Rooms } from './pages/Rooms'
@@ -15,10 +18,25 @@ import { Settings } from './pages/Settings'
 import { Unauthorized } from './pages/Unauthorized'
 
 export default function App() {
+  // capture errors that escape React's render tree — uncaught exceptions and
+  // unhandled promise rejections — so they land in the error log too
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => logError(e.message, e.error?.stack, 'window.onerror')
+    const onRejection = (e: PromiseRejectionEvent) =>
+      logError(String(e.reason?.message ?? e.reason), e.reason?.stack, 'unhandledrejection')
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
+  }, [])
+
   return (
     <ToastProvider>
       <AuthProvider>
         <UpdateBanner />
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
@@ -40,6 +58,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </AuthProvider>
     </ToastProvider>
   )

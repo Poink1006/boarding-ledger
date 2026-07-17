@@ -27,10 +27,12 @@ const TABS = [
   { id: 'organization', label: 'Organization' },
   { id: 'backup', label: 'Backup' },
   { id: 'activity', label: 'Activity log' },
+  { id: 'errors', label: 'Errors' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
 
 type AuditRow = Database['public']['Tables']['audit_log']['Row']
+type ErrorRow = Database['public']['Tables']['error_log']['Row']
 
 // human-readable summary of an audit entry for the activity log
 function describeAudit(row: AuditRow): { action: string; badge: string; entity: string } {
@@ -131,6 +133,22 @@ export function Settings() {
   const [auditLog, setAuditLog] = useState<AuditRow[]>([])
   const [auditLoading, setAuditLoading] = useState(false)
 
+  // error log, likewise fetched on demand
+  const [errorLog, setErrorLog] = useState<ErrorRow[]>([])
+  const [errorLoading, setErrorLoading] = useState(false)
+
+  const loadErrors = useCallback(async () => {
+    setErrorLoading(true)
+    const { data, error } = await supabase
+      .from('error_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100)
+    if (error) showToast(error.message)
+    setErrorLog(data ?? [])
+    setErrorLoading(false)
+  }, [showToast])
+
   const [exporting, setExporting] = useState(false)
   // bump on each export so the "last backup" line refreshes without a reload
   const [backupTick, setBackupTick] = useState(0)
@@ -218,7 +236,8 @@ export function Settings() {
 
   useEffect(() => {
     if (activeTab === 'activity') loadAudit()
-  }, [activeTab, loadAudit])
+    if (activeTab === 'errors') loadErrors()
+  }, [activeTab, loadAudit, loadErrors])
 
   async function handleSave() {
     const shared = Number(sharedRate)
@@ -630,6 +649,56 @@ export function Settings() {
                       </tr>
                     )
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === 'errors' && (
+        <>
+          <div className="page-head" style={{ marginBottom: 12 }}>
+            <p className="hint" style={{ margin: 0, maxWidth: 620 }}>
+              Problems the app ran into for anyone using it — so you can see when something broke, and for whom,
+              without them having to describe it. Showing the 100 most recent.
+            </p>
+            <button className="btn btn-ghost btn-sm" onClick={loadErrors} disabled={errorLoading}>
+              {errorLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {errorLoading && errorLog.length === 0 ? (
+            <SkeletonTable rows={5} cols={3} />
+          ) : errorLog.length === 0 ? (
+            <div className="table-wrap">
+              <div className="empty-state">
+                <h3>No errors logged</h3>
+                <p>If the app hits a problem for anyone, it'll be recorded here.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Who</th>
+                    <th>Problem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {errorLog.map((row) => (
+                    <tr key={row.id}>
+                      <td className="sub-cell" style={{ whiteSpace: 'nowrap' }}>
+                        {fmtDateTime(row.created_at)}
+                      </td>
+                      <td>{row.user_name || '—'}</td>
+                      <td>
+                        {row.message}
+                        {row.context && <div className="sub-cell">{row.context.split('\n')[0]}</div>}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
