@@ -303,6 +303,32 @@ describe('per-tenant utility overage', () => {
     expect(b.utilityBalance).toBe(-300) // 700 paid of 1000 due
   })
 
+  it('splits each bill by the roster of that bill month, not the current one', () => {
+    // t1 lived there Jan–May then moved out; t2 stays on. The May bill was
+    // shared by both; the June bill is t2's alone — a past bill must not
+    // re-split just because t1 later left.
+    const t1 = makeTenant({ id: 'h1', room_id: 'R1', move_in_date: '2026-01-15', status: 'inactive', move_out_date: '2026-05-31' })
+    const t2 = makeTenant({ id: 'h2', room_id: 'R1', move_in_date: '2026-01-15', status: 'active' })
+    const ctx: UtilityBalanceContext = {
+      rooms: [room],
+      tenants: [t1, t2],
+      utilityBills: [
+        makeBill({ apartment_id: 'A1', utility_type: 'electricity', billing_month: '2026-05-01', total_cost: 2000 }),
+        makeBill({ apartment_id: 'A1', utility_type: 'electricity', billing_month: '2026-06-01', total_cost: 2000 }),
+      ],
+      settings: makeSettings(), // electricity allowance 500/head
+    }
+    // May: headcount 2, allowance 1000, excess 1000, each owes 500
+    // June: headcount 1 (t2 only), allowance 500, excess 1500, t2 owes 1500
+    const t2bal = computeTenantBalance(t2, [], [], ctx)
+    expect(t2bal.utilityCharges.map((c) => c.amount)).toEqual([500, 1500])
+    expect(t2bal.utilityDue).toBe(2000)
+    // t1 only owes the May share and nothing for June (moved out)
+    const t1bal = computeTenantBalance(t1, [], [], ctx)
+    expect(t1bal.utilityCharges.map((c) => c.month)).toEqual(['2026-05-01'])
+    expect(t1bal.utilityDue).toBe(500)
+  })
+
   it('excludes utility bills from before the tenant moved in', () => {
     const t1 = makeTenant({ id: 'u5', room_id: 'R1', move_in_date: '2026-06-01', status: 'active' })
     const ctx: UtilityBalanceContext = {

@@ -1,5 +1,4 @@
 import { addMonths, todayStr, dateToMonthInput } from './format'
-import { occupiesBed } from './tenantStatus'
 import { roundCentavos } from './money'
 import type { Database } from './database.types'
 
@@ -52,13 +51,20 @@ export interface UtilityBalanceContext {
   settings: AppSettings | null
 }
 
-// How many current occupants (active + reserved) share apartmentId's beds —
-// this is always the CURRENT roster, not a historical per-month snapshot,
-// so it's a simplification: bills are assumed to be entered soon after the
-// month they cover, when the current roster still matches who was there.
-function apartmentHeadcount(apartmentId: string, ctx: UtilityBalanceContext) {
+// How many tenants were living in apartmentId during billMonth ('YYYY-MM').
+// Uses each tenant's move-in / move-out dates — the roster AS OF that month —
+// not the current roster, so a bill from a past month is split among the people
+// who actually lived there then, and doesn't silently re-split when someone
+// later moves out. Room attribution uses the tenant's current room_id (we don't
+// track historical room moves), a bounded simplification.
+function apartmentHeadcountForMonth(apartmentId: string, billMonth: string, ctx: UtilityBalanceContext) {
   const roomIds = new Set(ctx.rooms.filter((r) => r.apartment_id === apartmentId).map((r) => r.id))
-  return ctx.tenants.filter((t) => occupiesBed(t.status) && t.room_id && roomIds.has(t.room_id)).length
+  return ctx.tenants.filter((t) => {
+    if (!t.room_id || !roomIds.has(t.room_id)) return false
+    if (!t.move_in_date || dateToMonthInput(t.move_in_date) > billMonth) return false // not yet moved in that month
+    if (t.move_out_date && dateToMonthInput(t.move_out_date) < billMonth) return false // already moved out before it
+    return true
+  }).length
 }
 
 // Each tenant's rent is assumed to cover an allowance per utility. Any
@@ -73,8 +79,6 @@ function computeUtilityShares(
   if (!tenant.room_id || !ctx.settings) return []
   const room = ctx.rooms.find((r) => r.id === tenant.room_id)
   if (!room) return []
-  const headcount = apartmentHeadcount(room.apartment_id, ctx)
-  if (headcount === 0) return []
 
   const cutoff = tenant.status === 'inactive' && tenant.move_out_date ? tenant.move_out_date : todayStr()
   const cutoffMonth = dateToMonthInput(cutoff)
@@ -86,6 +90,10 @@ function computeUtilityShares(
     const billMonth = dateToMonthInput(bill.billing_month)
     if (startMonth && billMonth < startMonth) continue
     if (billMonth > cutoffMonth) continue
+    // headcount is the roster for THAT bill's month, so past bills stay split
+    // among who lived there then
+    const headcount = apartmentHeadcountForMonth(room.apartment_id, billMonth, ctx)
+    if (headcount === 0) continue
     const allowance =
       (bill.utility_type === 'electricity'
         ? ctx.settings.electricity_allowance_per_tenant
