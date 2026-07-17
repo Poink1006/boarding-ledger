@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { updateGuarded } from '../../lib/db'
 import { useToast } from '../../contexts/ToastContext'
 import { Modal } from '../../components/Modal'
 import { todayStr } from '../../lib/format'
@@ -57,12 +58,14 @@ export function PaymentModal({
     }
 
     setSaving(true)
-    const { error } = initial
-      ? await supabase.from('payments').update(payload).eq('id', initial.id)
-      : await supabase.from('payments').insert(payload)
+    // edits use an optimistic-locking guard so two staff can't silently
+    // overwrite each other; a fresh insert has nothing to conflict with
+    const errorMsg = initial
+      ? (await updateGuarded('payments', initial, payload)).error
+      : (await supabase.from('payments').insert(payload)).error?.message ?? null
     setSaving(false)
-    if (error) {
-      showToast(error.message)
+    if (errorMsg) {
+      showToast(errorMsg)
       return
     }
     showToast(initial ? 'Payment updated.' : 'Payment logged.')

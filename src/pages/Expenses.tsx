@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { updateGuarded } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { Modal } from '../components/Modal'
@@ -473,12 +474,14 @@ function ExpenseModal({
       notes: notes.trim() || null,
     }
     setSaving(true)
-    const { error } = initial
-      ? await supabase.from('expenses').update(payload).eq('id', initial.id)
-      : await supabase.from('expenses').insert({ ...payload, created_by: createdBy })
+    // edits use an optimistic-locking guard so two admins can't silently
+    // overwrite each other; a fresh insert has nothing to conflict with
+    const errorMsg = initial
+      ? (await updateGuarded('expenses', initial, payload)).error
+      : (await supabase.from('expenses').insert({ ...payload, created_by: createdBy })).error?.message ?? null
     setSaving(false)
-    if (error) {
-      showToast(error.message)
+    if (errorMsg) {
+      showToast(errorMsg)
       return
     }
     showToast(initial ? 'Expense updated.' : 'Expense added.')

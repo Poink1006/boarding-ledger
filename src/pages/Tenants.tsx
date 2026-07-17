@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { updateGuarded } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { Modal } from '../components/Modal'
@@ -1040,10 +1041,12 @@ function TenantModal({
       // status is intentionally left untouched here — moving a tenant
       // in/out or activating them are separate explicit actions, not a
       // side effect of editing their details
-      const { error } = await supabase.from('tenants').update(payload).eq('id', initial.id)
+      // optimistic-locking guard: refuse the save if someone else edited this
+      // tenant since the form was opened, instead of silently overwriting them
+      const { error } = await updateGuarded('tenants', initial, payload)
       if (error) {
         setSaving(false)
-        showToast(error.message)
+        showToast(error)
         return
       }
       // if an admin changed the rate, date-stamp it so past cycles keep the old

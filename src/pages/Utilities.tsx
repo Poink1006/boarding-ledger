@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { updateGuarded } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { naturalSort } from '../lib/rooms'
@@ -243,12 +244,14 @@ function UtilityRow({
       total_cost: costNum,
     }
     setSaving(true)
-    const { error } = bill
-      ? await supabase.from('utility_bills').update(payload).eq('id', bill.id)
-      : await supabase.from('utility_bills').insert(payload)
+    // edits use an optimistic-locking guard so two staff can't silently
+    // overwrite each other; a fresh insert has nothing to conflict with
+    const errorMsg = bill
+      ? (await updateGuarded('utility_bills', bill, payload)).error
+      : (await supabase.from('utility_bills').insert(payload)).error?.message ?? null
     setSaving(false)
-    if (error) {
-      showToast(error.message)
+    if (errorMsg) {
+      showToast(errorMsg)
       return
     }
     showToast(bill ? 'Bill updated.' : 'Bill logged.')
