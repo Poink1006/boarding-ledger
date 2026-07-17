@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { MigrationBanner } from './MigrationBanner'
 import logo from '../assets/logo.png'
 
 const NAV_ITEMS = [
@@ -72,6 +73,7 @@ export function Layout() {
         </div>
       </div>
       <div className="main">
+        <MigrationBanner />
         {viewingAsUser && (
           <div className="view-as-banner">
             Previewing the app as a regular user. <button onClick={toggleViewAsUser} type="button">Switch back to Admin</button>

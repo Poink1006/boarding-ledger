@@ -418,6 +418,21 @@ export interface Database {
         }
         Relationships: []
       }
+      schema_migrations: {
+        Row: {
+          version: string
+          applied_at: string
+        }
+        Insert: {
+          version: string
+          applied_at?: string
+        }
+        Update: {
+          version?: string
+          applied_at?: string
+        }
+        Relationships: []
+      }
       audit_log: {
         Row: {
           id: string
