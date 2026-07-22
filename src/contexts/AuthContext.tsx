@@ -7,6 +7,7 @@ import {
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { clearAllCached } from '../lib/cache'
 import type { UserRole } from '../lib/database.types'
 
 interface Profile {
@@ -67,6 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setProfile(null)
         setViewingAsUser(false)
+        // don't leave cached tenant/payment data on a shared machine
+        clearAllCached()
       }
       setLoading(false)
     })
