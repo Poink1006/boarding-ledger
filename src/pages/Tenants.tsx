@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { updateGuarded } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
@@ -362,9 +363,9 @@ export function Tenants() {
                   <tr key={t.id}>
                     <td className="mono">{t.tenant_number}</td>
                     <td>
-                      <div className="name-cell">
+                      <Link to={`/tenants/${t.id}`} className="name-cell" style={{ color: 'inherit', textDecoration: 'underline' }}>
                         {t.first_name} {t.last_name}
-                      </div>
+                      </Link>
                       <div className="sub-cell">{t.contact_number || '—'}</div>
                     </td>
                     <td>

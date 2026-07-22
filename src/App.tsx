@@ -11,6 +11,7 @@ import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Rooms } from './pages/Rooms'
 import { Tenants } from './pages/Tenants'
+import { TenantProfile } from './pages/TenantProfile'
 import { Payments } from './pages/Payments'
 import { Utilities } from './pages/Utilities'
 import { Expenses } from './pages/Expenses'
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/rooms" element={<Rooms />} />
               <Route path="/tenants" element={<Tenants />} />
+              <Route path="/tenants/:id" element={<TenantProfile />} />
               <Route path="/payments" element={<Payments />} />
               <Route path="/utilities" element={<Utilities />} />
 
