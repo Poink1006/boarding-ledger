@@ -269,3 +269,110 @@ export function StatementDoc({
     </>
   )
 }
+
+export interface MonthlyApartmentRow {
+  name: string
+  rent: number
+  utilityIn: number
+  utilityCost: number
+}
+
+// A printable per-apartment income/expense summary for one month, so the owner
+// can see which building made money and what the overhead was. Income is cash
+// collected that month; per-apartment "net" is before shared overhead, which is
+// listed separately below.
+export function MonthlySummaryDoc({
+  settings,
+  monthLabel,
+  rows,
+  overhead,
+}: {
+  settings: AppSettings | null
+  monthLabel: string
+  rows: MonthlyApartmentRow[]
+  overhead: { label: string; amount: number }[]
+}) {
+  const totIncome = rows.reduce((s, r) => s + r.rent + r.utilityIn, 0)
+  const totUtilityCost = rows.reduce((s, r) => s + r.utilityCost, 0)
+  const totOverhead = overhead.reduce((s, o) => s + o.amount, 0)
+  const totExpenses = totUtilityCost + totOverhead
+  const net = totIncome - totExpenses
+
+  return (
+    <>
+      <DocHeader
+        settings={settings}
+        right={
+          <>
+            <div className="doc-title">Monthly Summary</div>
+            <div className="doc-muted" style={{ fontSize: 12, marginTop: 2 }}>{monthLabel}</div>
+          </>
+        }
+      />
+      <hr className="doc-hr" />
+
+      <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', margin: '4px 0 6px' }}>INCOME BY APARTMENT</div>
+      <table className="doc-table" style={{ marginBottom: 16 }}>
+        <thead>
+          <tr>
+            <th>Apartment</th>
+            <th style={{ textAlign: 'right' }}>Rent</th>
+            <th style={{ textAlign: 'right' }}>Utility collected</th>
+            <th style={{ textAlign: 'right' }}>Utility bill</th>
+            <th style={{ textAlign: 'right' }}>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td>{r.name}</td>
+              <td style={{ textAlign: 'right' }}>{fmtMoney(r.rent)}</td>
+              <td style={{ textAlign: 'right' }}>{fmtMoney(r.utilityIn)}</td>
+              <td style={{ textAlign: 'right' }}>{fmtMoney(r.utilityCost)}</td>
+              <td style={{ textAlign: 'right' }}>{fmtMoney(r.rent + r.utilityIn - r.utilityCost)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style={{ fontWeight: 600 }}>Total</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(rows.reduce((s, r) => s + r.rent, 0))}</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(rows.reduce((s, r) => s + r.utilityIn, 0))}</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(totUtilityCost)}</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(totIncome - totUtilityCost)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', margin: '4px 0 6px' }}>SHARED OVERHEAD</div>
+      <table className="doc-table" style={{ marginBottom: 16 }}>
+        <tbody>
+          {overhead.map((o, i) => (
+            <tr key={i}>
+              <td>{o.label}</td>
+              <td style={{ textAlign: 'right' }}>{fmtMoney(o.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style={{ fontWeight: 600 }}>Total overhead</td>
+            <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtMoney(totOverhead)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <hr className="doc-hr" />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, fontSize: 13, marginBottom: 4 }}>
+        <span className="doc-muted">Total income {fmtMoney(totIncome)}</span>
+        <span className="doc-muted">Total expenses {fmtMoney(totExpenses)}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontWeight: 600 }}>Net income</span>
+        <span style={{ fontSize: 20, fontWeight: 600, color: net < 0 ? '#a32d2d' : '#0f6e56' }}>
+          {net < 0 ? `-${fmtMoney(-net)}` : fmtMoney(net)}
+        </span>
+      </div>
+    </>
+  )
+}

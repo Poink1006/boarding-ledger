@@ -4,14 +4,21 @@ import { updateGuarded } from '../lib/db'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { Modal } from '../components/Modal'
+import { PrintModal } from '../components/PrintModal'
+import { MonthlySummaryDoc, type MonthlyApartmentRow } from '../components/documents'
 import { SkeletonTable } from '../components/Skeleton'
 import { getCached, setCached, hasCached } from '../lib/cache'
+import { naturalSort } from '../lib/rooms'
 import { fmtMoney, fmtMonth, todayStr, monthInputToDate } from '../lib/format'
 import type { Database, ExpenseCategory } from '../lib/database.types'
 
 type Expense = Database['public']['Tables']['expenses']['Row']
 type UtilityBill = Database['public']['Tables']['utility_bills']['Row']
 type Payment = Database['public']['Tables']['payments']['Row']
+type Apartment = Database['public']['Tables']['apartments']['Row']
+type Room = Database['public']['Tables']['rooms']['Row']
+type Tenant = Database['public']['Tables']['tenants']['Row']
+type AppSettings = Database['public']['Tables']['app_settings']['Row']
 
 // display order + labels for the fixed category set
 const CATEGORIES: { id: ExpenseCategory; label: string }[] = [
@@ -50,6 +57,10 @@ interface ExpensesData {
   expenses: Expense[]
   utilityBills: UtilityBill[]
   payments: Payment[]
+  apartments: Apartment[]
+  rooms: Room[]
+  tenants: Tenant[]
+  settings: AppSettings | null
 }
 
 export function Expenses() {
@@ -60,21 +71,31 @@ export function Expenses() {
   const [expenses, setExpenses] = useState<Expense[]>(cached?.expenses ?? [])
   const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
   const [payments, setPayments] = useState<Payment[]>(cached?.payments ?? [])
+  const [apartments, setApartments] = useState<Apartment[]>(cached?.apartments ?? [])
+  const [rooms, setRooms] = useState<Room[]>(cached?.rooms ?? [])
+  const [tenants, setTenants] = useState<Tenant[]>(cached?.tenants ?? [])
+  const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
   const [loading, setLoading] = useState(!cached)
 
   const currentMonth = todayStr().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
   const [activeTab, setActiveTab] = useState<TabId>('summary')
   const [modal, setModal] = useState<ExpenseModalState>(null)
+  const [reportOpen, setReportOpen] = useState(false)
 
   const loadAll = useCallback(
     async (silent: boolean) => {
       if (!silent) setLoading(true)
-      const [expensesRes, utilityBillsRes, paymentsRes] = await Promise.all([
-        supabase.from('expenses').select('*').is('deleted_at', null),
-        supabase.from('utility_bills').select('*'),
-        supabase.from('payments').select('*').is('deleted_at', null),
-      ])
+      const [expensesRes, utilityBillsRes, paymentsRes, apartmentsRes, roomsRes, tenantsRes, settingsRes] =
+        await Promise.all([
+          supabase.from('expenses').select('*').is('deleted_at', null),
+          supabase.from('utility_bills').select('*'),
+          supabase.from('payments').select('*').is('deleted_at', null),
+          supabase.from('apartments').select('*'),
+          supabase.from('rooms').select('*'),
+          supabase.from('tenants').select('*').is('deleted_at', null),
+          supabase.from('app_settings').select('*').single(),
+        ])
       if (expensesRes.error) showToast(expensesRes.error.message)
       if (utilityBillsRes.error) showToast(utilityBillsRes.error.message)
       if (paymentsRes.error) showToast(paymentsRes.error.message)
@@ -82,11 +103,19 @@ export function Expenses() {
         expenses: expensesRes.data ?? [],
         utilityBills: utilityBillsRes.data ?? [],
         payments: paymentsRes.data ?? [],
+        apartments: [...(apartmentsRes.data ?? [])].sort((a, b) => naturalSort.compare(a.name, b.name)),
+        rooms: roomsRes.data ?? [],
+        tenants: tenantsRes.data ?? [],
+        settings: settingsRes.data ?? null,
       }
       setCached(CACHE_KEY, data)
       setExpenses(data.expenses)
       setUtilityBills(data.utilityBills)
       setPayments(data.payments)
+      setApartments(data.apartments)
+      setRooms(data.rooms)
+      setTenants(data.tenants)
+      setSettings(data.settings)
       setLoading(false)
     },
     [showToast],
@@ -152,10 +181,37 @@ export function Expenses() {
   const grandTotal = manualTotal + utilitiesTotal
 
   // income = payments actually collected this month (cash basis)
-  const totalIncome = payments
-    .filter((p) => p.date_paid.slice(0, 7) === month)
-    .reduce((s, p) => s + Number(p.amount || 0), 0)
+  const monthPayments = payments.filter((p) => p.date_paid.slice(0, 7) === month)
+  const totalIncome = monthPayments.reduce((s, p) => s + Number(p.amount || 0), 0)
   const netIncome = totalIncome - grandTotal
+
+  // per-apartment income/expense rows for the printable monthly summary: resolve
+  // each payment to an apartment via tenant -> room; unattributable ones (tenant
+  // with no room) fall into an "Unassigned" row so totals still add up
+  const roomApt = new Map(rooms.map((r) => [r.id, r.apartment_id]))
+  const tenantById = new Map(tenants.map((t) => [t.id, t]))
+  const paymentApt = (p: Payment): string | null => {
+    const t = tenantById.get(p.tenant_id)
+    return t?.room_id ? roomApt.get(t.room_id) ?? null : null
+  }
+  const sumBy = (list: Payment[], type: string) =>
+    list.filter((p) => p.payment_type === type).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const summaryRows: MonthlyApartmentRow[] = apartments.map((a) => {
+    const pays = monthPayments.filter((p) => paymentApt(p) === a.id)
+    return {
+      name: a.name,
+      rent: sumBy(pays, 'rent'),
+      utilityIn: sumBy(pays, 'utility'),
+      utilityCost: utilityBills
+        .filter((b) => b.apartment_id === a.id && b.billing_month.slice(0, 7) === month)
+        .reduce((s, b) => s + Number(b.total_cost || 0), 0),
+    }
+  })
+  const unassigned = monthPayments.filter((p) => paymentApt(p) === null)
+  if (unassigned.length > 0) {
+    summaryRows.push({ name: 'Unassigned', rent: sumBy(unassigned, 'rent'), utilityIn: sumBy(unassigned, 'utility'), utilityCost: 0 })
+  }
+  const overheadRows = categoryTotals.map((c) => ({ label: c.label, amount: c.total }))
 
   return (
     <>
@@ -208,6 +264,12 @@ export function Expenses() {
             monthLabel={fmtMonth(monthInputToDate(month))}
           />
 
+          <div style={{ marginBottom: 24 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setReportOpen(true)}>
+              Print monthly summary
+            </button>
+          </div>
+
           <div className="section-title">Expense breakdown · {fmtMonth(monthInputToDate(month))}</div>
           <ExpensePieChart
             slices={[
@@ -240,6 +302,17 @@ export function Expenses() {
             loadAll(true)
           }}
         />
+      )}
+
+      {reportOpen && (
+        <PrintModal onClose={() => setReportOpen(false)}>
+          <MonthlySummaryDoc
+            settings={settings}
+            monthLabel={fmtMonth(monthInputToDate(month))}
+            rows={summaryRows}
+            overhead={overheadRows}
+          />
+        </PrintModal>
       )}
     </>
   )
