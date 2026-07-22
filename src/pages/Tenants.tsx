@@ -27,6 +27,7 @@ type TenantModalState = { mode: 'add' } | { mode: 'edit'; tenant: Tenant } | nul
 type DepositModalState = { tenant: Tenant } | null
 type MoveModalState = { tenant: Tenant } | null
 type AddDepositModalState = { tenant: Tenant } | null
+type MoveOutModalState = { tenant: Tenant } | null
 
 function occupiedBedIndexes(tenants: Tenant[], roomId: string, excludeId?: string) {
   const s = new Set<number>()
@@ -121,6 +122,7 @@ export function Tenants() {
   const [depositModal, setDepositModal] = useState<DepositModalState>(null)
   const [moveModal, setMoveModal] = useState<MoveModalState>(null)
   const [addDepositModal, setAddDepositModal] = useState<AddDepositModalState>(null)
+  const [moveOutModal, setMoveOutModal] = useState<MoveOutModalState>(null)
 
   const loadAll = useCallback(
     async (silent = false) => {
@@ -431,8 +433,10 @@ export function Tenants() {
                             },
                             { label: 'Move', onClick: () => setMoveModal({ tenant: t }), hidden: t.status === 'inactive' },
                             {
+                              // cancelling a reservation is a simple free-the-bed action;
+                              // moving out an active tenant opens the settlement flow
                               label: t.status === 'pending' ? 'Cancel' : 'Move out',
-                              onClick: () => moveOutTenant(t),
+                              onClick: () => (t.status === 'pending' ? moveOutTenant(t) : setMoveOutModal({ tenant: t })),
                               danger: true,
                               hidden: t.status === 'inactive',
                             },
@@ -487,6 +491,18 @@ export function Tenants() {
           onClose={() => setAddDepositModal(null)}
           onSaved={() => {
             setAddDepositModal(null)
+            loadAll(true)
+          }}
+        />
+      )}
+
+      {moveOutModal && (
+        <MoveOutModal
+          tenant={moveOutModal.tenant}
+          balance={computeTenantBalance(moveOutModal.tenant, payments, rateHistory, utilityContext)}
+          onClose={() => setMoveOutModal(null)}
+          onSaved={() => {
+            setMoveOutModal(null)
             loadAll(true)
           }}
         />
@@ -567,6 +583,172 @@ function AddDepositModal({
           collected and later returned from the Security Deposit action once it's added here.
         </div>
       </div>
+    </Modal>
+  )
+}
+
+function moveOutBalanceLabel(v: number) {
+  if (v < 0) return { text: `Owes ${fmtMoney(-v)}`, cls: 'badge-overdue' }
+  if (v > 0) return { text: `Credit ${fmtMoney(v)}`, cls: 'badge-paid' }
+  return { text: 'Settled', cls: 'badge-pending' }
+}
+
+// Guided move-out: shows the tenant's final rent/utility position and settles
+// the held security deposit (deductions -> refund) in one step, then marks them
+// moved out. Reconciliation writes go through the concurrency guard.
+function MoveOutModal({
+  tenant,
+  balance,
+  onClose,
+  onSaved,
+}: {
+  tenant: Tenant
+  balance: ReturnType<typeof computeTenantBalance>
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const { showToast } = useToast()
+  const [moveOutDate, setMoveOutDate] = useState(todayStr())
+  const [saving, setSaving] = useState(false)
+
+  const depositHeld = tenant.deposit_status === 'held' && tenant.deposit_amount > 0
+  const [deductions, setDeductions] = useState('0')
+  const [notes, setNotes] = useState('')
+
+  const rentOwed = balance.rentBalance < 0 ? -balance.rentBalance : 0
+  const utilityOwed = balance.utilityBalance < 0 ? -balance.utilityBalance : 0
+  const totalOwed = rentOwed + utilityOwed
+
+  const deductionNum = Math.max(0, Number(deductions) || 0)
+  const refund = depositHeld ? Math.max(0, tenant.deposit_amount - deductionNum) : 0
+  const overDeducted = depositHeld && deductionNum > tenant.deposit_amount
+  // net cash movement at the desk: deposit going back to the tenant, minus what
+  // they still owe (a simple guide; the operator can settle however they like)
+  const netToTenant = refund - totalOwed
+
+  const rentLabel = moveOutBalanceLabel(balance.rentBalance)
+  const utilityLabel = moveOutBalanceLabel(balance.utilityBalance)
+
+  async function handleConfirm() {
+    if (!moveOutDate) {
+      showToast('Pick a move-out date.')
+      return
+    }
+    if (overDeducted) {
+      showToast('Deductions cannot exceed the deposit amount.')
+      return
+    }
+    setSaving(true)
+    const payload: Record<string, unknown> = {
+      status: 'inactive',
+      move_out_date: moveOutDate,
+    }
+    if (depositHeld) {
+      payload.deposit_status = 'refunded'
+      payload.deposit_returned_amount = refund
+      payload.deposit_returned_date = moveOutDate
+      const parts: string[] = []
+      if (deductionNum > 0) parts.push(`deductions ${fmtMoney(deductionNum)}`)
+      if (notes.trim()) parts.push(notes.trim())
+      if (parts.length > 0) {
+        const entry = `[${fmtDate(moveOutDate)}] Move-out: ${parts.join(' — ')}`
+        payload.deposit_notes = tenant.deposit_notes ? `${tenant.deposit_notes}\n${entry}` : entry
+      }
+    }
+    const { error } = await updateGuarded('tenants', tenant, payload)
+    setSaving(false)
+    if (error) {
+      showToast(error)
+      return
+    }
+    showToast(`${tenant.first_name} ${tenant.last_name} moved out.`)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title={`${tenant.first_name} ${tenant.last_name} — move out`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-danger" onClick={handleConfirm} disabled={saving}>
+            {saving ? 'Saving…' : 'Confirm move-out'}
+          </button>
+        </>
+      }
+    >
+      <div className="form-group" style={{ maxWidth: 220 }}>
+        <label>Move-out date</label>
+        <input type="date" value={moveOutDate} onChange={(e) => setMoveOutDate(e.target.value)} />
+      </div>
+
+      <div className="fieldset-title">Final balance</div>
+      <div className="room-list" style={{ marginBottom: 16 }}>
+        <div className="room-row" style={{ cursor: 'default' }}>
+          <span>Rent</span>
+          <span className={`badge ${rentLabel.cls}`}>{rentLabel.text}</span>
+        </div>
+        <div className="room-row" style={{ cursor: 'default' }}>
+          <span>Utilities</span>
+          <span className={`badge ${utilityLabel.cls}`}>{utilityLabel.text}</span>
+        </div>
+      </div>
+      {totalOwed > 0 && (
+        <div className="hint" style={{ marginBottom: 16 }}>
+          This tenant still owes {fmtMoney(totalOwed)}. Collect it at the desk, or deduct it from the deposit below.
+        </div>
+      )}
+
+      <div className="fieldset-title">Security deposit</div>
+      {!depositHeld ? (
+        <div className="hint" style={{ marginBottom: 8 }}>
+          {tenant.deposit_status === 'refunded'
+            ? 'Already refunded.'
+            : tenant.deposit_amount > 0
+              ? 'A deposit was recorded but never marked as collected, so there is nothing to refund.'
+              : 'No security deposit on file.'}
+        </div>
+      ) : (
+        <>
+          <div className="room-row" style={{ cursor: 'default' }}>
+            <span>Deposit held</span>
+            <span>{fmtMoney(tenant.deposit_amount)}</span>
+          </div>
+          <div className="form-row form-row-align" style={{ marginTop: 10 }}>
+            <div className="form-group">
+              <label>Deductions (₱)</label>
+              <input type="number" min={0} value={deductions} onChange={(e) => setDeductions(e.target.value)} />
+              {totalOwed > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginTop: 6 }}
+                  onClick={() => setDeductions(String(Math.min(tenant.deposit_amount, totalOwed)))}
+                >
+                  Deduct outstanding ({fmtMoney(Math.min(tenant.deposit_amount, totalOwed))})
+                </button>
+              )}
+            </div>
+            <div className="form-group">
+              <label>Refund to tenant</label>
+              <input value={fmtMoney(refund)} disabled />
+            </div>
+          </div>
+          {overDeducted && <div className="hint" style={{ color: 'var(--clay)' }}>Deductions exceed the deposit.</div>}
+          <div className="form-group">
+            <label>Reason / notes (optional)</label>
+            <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. cleaning, damage to door" />
+          </div>
+          {totalOwed > 0 && (
+            <div className="hint">
+              Net at the desk: {netToTenant >= 0 ? `${fmtMoney(netToTenant)} back to tenant` : `${fmtMoney(-netToTenant)} still to collect`}
+            </div>
+          )}
+        </>
+      )}
     </Modal>
   )
 }
