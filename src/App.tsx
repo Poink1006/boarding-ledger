@@ -13,6 +13,7 @@ import { Rooms } from './pages/Rooms'
 import { Tenants } from './pages/Tenants'
 import { TenantProfile } from './pages/TenantProfile'
 import { Payments } from './pages/Payments'
+import { Vacancies } from './pages/Vacancies'
 import { Utilities } from './pages/Utilities'
 import { Expenses } from './pages/Expenses'
 import { Settings } from './pages/Settings'
@@ -49,6 +50,7 @@ export default function App() {
               <Route path="/tenants" element={<Tenants />} />
               <Route path="/tenants/:id" element={<TenantProfile />} />
               <Route path="/payments" element={<Payments />} />
+              <Route path="/vacancies" element={<Vacancies />} />
               <Route path="/utilities" element={<Utilities />} />
 
               <Route element={<AdminRoute />}>

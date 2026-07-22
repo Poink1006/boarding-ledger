@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '▤', end: true },
   { to: '/rooms', label: 'Units & Rooms', icon: '▦' },
   { to: '/tenants', label: 'Tenants', icon: '☰' },
+  { to: '/vacancies', label: 'Vacancies', icon: '◇' },
   { to: '/payments', label: 'Payments', icon: '◈' },
   { to: '/utilities', label: 'Utilities', icon: '⚡' },
 ]
