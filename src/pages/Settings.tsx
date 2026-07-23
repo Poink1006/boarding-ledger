@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
@@ -9,7 +8,6 @@ import { fmtMoney, fmtDate } from '../lib/format'
 import { getCached, setCached, hasCached } from '../lib/cache'
 import { SkeletonBlock, SkeletonTable } from '../components/Skeleton'
 import { exportAllData, daysSinceLastBackup, getLastBackupAt, BACKUP_STALE_DAYS } from '../lib/backup'
-import { toLoginEmail } from '../lib/username'
 import type { Database, UserRole } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
@@ -891,22 +889,28 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
       return
     }
     setSaving(true)
-    // Sign the new account up through a SEPARATE, non-persisting client so it
-    // doesn't overwrite the admin's own session (persistSession:false keeps it
-    // off localStorage). Only the public anon key is used — no service_role.
-    // The username maps to a synthetic email; the handle_new_user DB trigger
-    // creates their profile (role 'user') with the full_name + username.
-    const tempClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
-    const { error } = await tempClient.auth.signUp({
-      email: toLoginEmail(uname),
-      password,
-      options: { data: { full_name: fullName.trim(), username: uname } },
+    // Create the account via the create-user Edge Function, which uses the
+    // Admin API server-side (service_role) — so there's no confirmation email
+    // and no email rate limit, and the admin's own session is untouched. The
+    // function verifies the caller is an admin and builds the synthetic email.
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: { fullName: fullName.trim(), username: uname, password },
     })
     setSaving(false)
     if (error) {
-      showToast(/already registered/i.test(error.message) ? 'That username is already taken.' : error.message)
+      // a 4xx from the function carries a friendly message in its body
+      let msg = 'Could not create the user. Make sure the create-user function is deployed in Supabase.'
+      try {
+        const body = await error.context.json()
+        if (body?.error) msg = body.error
+      } catch {
+        // keep the generic message
+      }
+      showToast(msg)
+      return
+    }
+    if (data?.error) {
+      showToast(data.error)
       return
     }
     showToast(`Account created for ${fullName.trim()} (username: ${uname}).`)
