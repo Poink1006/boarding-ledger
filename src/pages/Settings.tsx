@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
@@ -8,7 +9,7 @@ import { fmtMoney, fmtDate } from '../lib/format'
 import { getCached, setCached, hasCached } from '../lib/cache'
 import { SkeletonBlock, SkeletonTable } from '../components/Skeleton'
 import { exportAllData, daysSinceLastBackup, getLastBackupAt, BACKUP_STALE_DAYS } from '../lib/backup'
-import type { Database } from '../lib/database.types'
+import type { Database, UserRole } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
 type Apartment = Database['public']['Tables']['apartments']['Row']
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'utilities', label: 'Utility allowances' },
   { id: 'overrides', label: 'Custom overrides' },
   { id: 'organization', label: 'Organization' },
+  { id: 'users', label: 'Users' },
   { id: 'backup', label: 'Backup' },
   { id: 'activity', label: 'Activity log' },
   { id: 'errors', label: 'Errors' },
@@ -149,6 +151,33 @@ export function Settings() {
     setErrorLoading(false)
   }, [showToast])
 
+  // user accounts, fetched on demand when the Users tab is opened
+  const [users, setUsers] = useState<Profile[]>([])
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [addUserOpen, setAddUserOpen] = useState(false)
+
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true)
+    const { data, error } = await supabase.from('profiles').select('*').order('full_name')
+    if (error) showToast(error.message)
+    setUsers(data ?? [])
+    setUsersLoading(false)
+  }, [showToast])
+
+  async function changeRole(u: Profile, role: UserRole) {
+    if (u.id === profile?.id) {
+      showToast("You can't change your own role.")
+      return
+    }
+    const { error } = await supabase.from('profiles').update({ role }).eq('id', u.id)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast(`${u.full_name || 'User'} is now ${role === 'admin' ? 'an admin' : 'staff'}.`)
+    loadUsers()
+  }
+
   const [exporting, setExporting] = useState(false)
   // bump on each export so the "last backup" line refreshes without a reload
   const [backupTick, setBackupTick] = useState(0)
@@ -237,7 +266,8 @@ export function Settings() {
   useEffect(() => {
     if (activeTab === 'activity') loadAudit()
     if (activeTab === 'errors') loadErrors()
-  }, [activeTab, loadAudit, loadErrors])
+    if (activeTab === 'users') loadUsers()
+  }, [activeTab, loadAudit, loadErrors, loadUsers])
 
   async function handleSave() {
     const shared = Number(sharedRate)
@@ -593,6 +623,64 @@ export function Settings() {
         </div>
       )}
 
+      {activeTab === 'users' && (
+        <>
+          <div className="page-head" style={{ marginBottom: 12 }}>
+            <p className="hint" style={{ margin: 0, maxWidth: 620 }}>
+              People who can sign in. New accounts start as staff — promote to admin here. Staff can view and log
+              data; admins can also manage pricing, expenses, users, and settings.
+            </p>
+            <button className="btn btn-primary btn-sm" onClick={() => setAddUserOpen(true)}>
+              + Add user
+            </button>
+          </div>
+          {usersLoading && users.length === 0 ? (
+            <SkeletonTable rows={4} cols={3} />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr key={u.id}>
+                      <td className="name-cell">
+                        {u.full_name || '—'} {u.id === profile?.id && <span className="sub-cell">(you)</span>}
+                      </td>
+                      <td>
+                        <span className={`badge ${u.role === 'admin' ? 'badge-active' : 'badge-pending'}`}>
+                          {u.role === 'admin' ? 'Admin' : 'Staff'}
+                        </span>
+                      </td>
+                      <td>
+                        {u.id !== profile?.id && (
+                          <div className="row-actions">
+                            {u.role === 'user' ? (
+                              <button className="btn btn-ghost btn-sm" onClick={() => changeRole(u, 'admin')}>
+                                Make admin
+                              </button>
+                            ) : (
+                              <button className="btn btn-ghost btn-sm" onClick={() => changeRole(u, 'user')}>
+                                Make staff
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
       {activeTab === 'backup' && (
         <BackupPanel
           exporting={exporting}
@@ -706,6 +794,16 @@ export function Settings() {
         </>
       )}
 
+      {addUserOpen && (
+        <AddUserModal
+          onClose={() => setAddUserOpen(false)}
+          onSaved={() => {
+            setAddUserOpen(false)
+            loadUsers()
+          }}
+        />
+      )}
+
       {priceGroupModal && (
         <PriceGroupModal
           initial={priceGroupModal.mode === 'edit' ? priceGroupModal.group : null}
@@ -765,6 +863,85 @@ function BackupPanel({ exporting, onExport }: { exporting: boolean; onExport: ()
         database. It contains tenant and payment details, so store it privately.
       </div>
     </div>
+  )
+}
+
+function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { showToast } = useToast()
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!fullName.trim()) {
+      showToast('Enter the person’s name.')
+      return
+    }
+    if (!email.trim()) {
+      showToast('Enter an email.')
+      return
+    }
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters.')
+      return
+    }
+    setSaving(true)
+    // Sign the new account up through a SEPARATE, non-persisting client so it
+    // doesn't overwrite the admin's own session (persistSession:false keeps it
+    // off localStorage). Only the public anon key is used — no service_role.
+    // The handle_new_user DB trigger creates their profile (role 'user') from
+    // the full_name we pass in metadata.
+    const tempClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+    const { error } = await tempClient.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { data: { full_name: fullName.trim() } },
+    })
+    setSaving(false)
+    if (error) {
+      showToast(error.message)
+      return
+    }
+    showToast(`Account created for ${fullName.trim()}.`)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      title="Add user"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Creating…' : 'Create account'}
+          </button>
+        </>
+      }
+    >
+      <div className="form-group">
+        <label>Full name</label>
+        <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Juan Dela Cruz" autoFocus />
+      </div>
+      <div className="form-group">
+        <label>Email (used to sign in)</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="juan@email.com" />
+      </div>
+      <div className="form-group">
+        <label>Temporary password</label>
+        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 6 characters" />
+        <div className="hint">
+          Share this with the new user so they can sign in, then they can be promoted to admin here if needed. New
+          accounts start as staff. If your Supabase project requires email confirmation, they'll need to confirm via
+          the emailed link before their first sign-in.
+        </div>
+      </div>
+    </Modal>
   )
 }
 
