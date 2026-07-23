@@ -6,7 +6,7 @@ import { useToast } from '../contexts/ToastContext'
 import { effectiveCapacity, naturalSort } from '../lib/rooms'
 import { computeTenantBalance } from '../lib/balance'
 import { buildReminder, reminderMailto } from '../lib/reminder'
-import { fmtMoney, todayStr } from '../lib/format'
+import { fmtMoney, fmtDate, todayStr } from '../lib/format'
 import { Modal } from '../components/Modal'
 import { SkeletonStatGrid } from '../components/Skeleton'
 import { getCached, setCached, hasCached } from '../lib/cache'
@@ -19,6 +19,7 @@ type Payment = Database['public']['Tables']['payments']['Row']
 type UtilityBill = Database['public']['Tables']['utility_bills']['Row']
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
 type RateChange = Database['public']['Tables']['tenant_rate_changes']['Row']
+type Expense = Database['public']['Tables']['expenses']['Row']
 
 const CACHE_KEY = 'dashboard'
 interface DashboardData {
@@ -29,6 +30,7 @@ interface DashboardData {
   utilityBills: UtilityBill[]
   settings: AppSettings | null
   rateHistory: RateChange[]
+  expenses: Expense[]
 }
 
 // how many rent cycles a tenant hasn't fully covered — a plain-language sense of
@@ -50,13 +52,14 @@ export function Dashboard() {
   const [utilityBills, setUtilityBills] = useState<UtilityBill[]>(cached?.utilityBills ?? [])
   const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
   const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
+  const [expenses, setExpenses] = useState<Expense[]>(cached?.expenses ?? [])
   const [loading, setLoading] = useState(!cached)
   const [reminderFor, setReminderFor] = useState<{ tenant: Tenant; balance: ReturnType<typeof computeTenantBalance> } | null>(null)
 
   const loadAll = useCallback(
     async (silent: boolean) => {
       if (!silent) setLoading(true)
-      const [apartmentsRes, roomsRes, tenantsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes] =
+      const [apartmentsRes, roomsRes, tenantsRes, paymentsRes, utilityBillsRes, settingsRes, rateHistoryRes, expensesRes] =
         await Promise.all([
           supabase.from('apartments').select('*'),
           supabase.from('rooms').select('*'),
@@ -65,6 +68,9 @@ export function Dashboard() {
           supabase.from('utility_bills').select('*'),
           supabase.from('app_settings').select('*').single(),
           supabase.from('tenant_rate_changes').select('*'),
+          // admin-only via RLS; returns [] for regular users, which is fine —
+          // the net-income card that uses it is admin-only anyway
+          supabase.from('expenses').select('*').is('deleted_at', null),
         ])
       if (apartmentsRes.error) showToast(apartmentsRes.error.message)
       if (roomsRes.error) showToast(roomsRes.error.message)
@@ -82,6 +88,7 @@ export function Dashboard() {
         utilityBills: utilityBillsRes.data ?? [],
         settings: settingsRes.data ?? null,
         rateHistory: rateHistoryRes.data ?? [],
+        expenses: expensesRes.data ?? [],
       }
       setCached(CACHE_KEY, data)
       setApartments(data.apartments)
@@ -91,6 +98,7 @@ export function Dashboard() {
       setUtilityBills(data.utilityBills)
       setSettings(data.settings)
       setRateHistory(data.rateHistory)
+      setExpenses(data.expenses)
       setLoading(false)
     },
     [showToast],
@@ -128,6 +136,14 @@ export function Dashboard() {
   const paymentsThisMonth = payments.filter((p) => p.date_paid.slice(0, 7) === currentMonth)
   const collectedThisMonth = paymentsThisMonth.reduce((s, p) => s + Number(p.amount || 0), 0)
 
+  // net income this month = collected − (this month's expenses + apartment
+  // utility bills). Expenses are admin-only data, so this only surfaces to admins.
+  const expensesThisMonth = expenses.filter((e) => e.expense_month.slice(0, 7) === currentMonth).reduce((s, e) => s + Number(e.amount || 0), 0)
+  const utilityCostThisMonth = utilityBills
+    .filter((b) => b.billing_month.slice(0, 7) === currentMonth)
+    .reduce((s, b) => s + Number(b.total_cost || 0), 0)
+  const netIncomeThisMonth = collectedThisMonth - (expensesThisMonth + utilityCostThisMonth)
+
   const utilityContext = { rooms, tenants, utilityBills, settings }
   const balancePairs = occupyingTenants.map((t) => ({ tenant: t, balance: computeTenantBalance(t, payments, rateHistory, utilityContext) }))
   const lowBalanceCount = balancePairs.filter((p) => p.balance.balance < 0).length
@@ -137,6 +153,22 @@ export function Dashboard() {
   const arrears = balancePairs
     .filter((p) => p.balance.balance < 0)
     .sort((a, b) => a.balance.balance - b.balance.balance)
+
+  // rent-due-soon: tenants who are NOT already behind but whose next rent cycle
+  // lands within the next 7 days and isn't already covered by prepaid credit —
+  // the proactive counterpart to the arrears list (remind before they lapse)
+  const now = new Date(todayStr() + 'T00:00:00')
+  const soonEdge = new Date(now)
+  soonEdge.setDate(soonEdge.getDate() + 7)
+  const dueSoon = balancePairs
+    .filter((p) => {
+      if (p.balance.balance < 0) return false // already overdue -> arrears list
+      if (p.balance.rentBalance >= Number(p.tenant.monthly_rate || 0)) return false // prepaid enough
+      if (!p.balance.nextDueDate) return false
+      const d = new Date(p.balance.nextDueDate + 'T00:00:00')
+      return d >= now && d <= soonEdge
+    })
+    .sort((a, b) => (a.balance.nextDueDate! < b.balance.nextDueDate! ? -1 : 1))
 
   return (
     <>
@@ -184,6 +216,15 @@ export function Dashboard() {
             <div className="stat-note">
               {paymentsThisMonth.length} payment{paymentsThisMonth.length === 1 ? '' : 's'} logged
             </div>
+          </div>
+        )}
+        {isAdmin && (
+          <div className="stat-card">
+            <div className="stat-label">Net Income This Month</div>
+            <div className={`stat-value ${netIncomeThisMonth < 0 ? 'clay' : 'sage'}`}>
+              {netIncomeThisMonth < 0 ? `-${fmtMoney(-netIncomeThisMonth)}` : fmtMoney(netIncomeThisMonth)}
+            </div>
+            <div className="stat-note">after {fmtMoney(expensesThisMonth + utilityCostThisMonth)} expenses</div>
           </div>
         )}
         <div className="stat-card">
@@ -249,6 +290,46 @@ export function Dashboard() {
                           Remind
                         </button>
                       </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {dueSoon.length > 0 && (
+        <>
+          <div className="section-title">Rent due soon</div>
+          <div className="table-wrap" style={{ marginBottom: 28 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tenant No.</th>
+                  <th>Tenant</th>
+                  <th>Room</th>
+                  <th>Due</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dueSoon.map(({ tenant, balance }) => {
+                  const room = rooms.find((r) => r.id === tenant.room_id)
+                  return (
+                    <tr
+                      key={tenant.id}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/tenants/${tenant.id}`)}
+                      title="Open tenant profile"
+                    >
+                      <td className="mono">{tenant.tenant_number}</td>
+                      <td className="name-cell">
+                        {tenant.first_name} {tenant.last_name}
+                      </td>
+                      <td className="mono">{room ? room.label : '—'}</td>
+                      <td>{fmtDate(balance.nextDueDate)}</td>
+                      <td>{fmtMoney(tenant.monthly_rate)}</td>
                     </tr>
                   )
                 })}
