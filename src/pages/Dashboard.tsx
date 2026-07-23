@@ -7,9 +7,8 @@ import { effectiveCapacity, naturalSort } from '../lib/rooms'
 import { computeTenantBalance } from '../lib/balance'
 import { buildReminder, reminderMailto } from '../lib/reminder'
 import { fmtMoney, todayStr } from '../lib/format'
-import { TENANT_STATUS_LABEL, TENANT_STATUS_BADGE, occupiesBed } from '../lib/tenantStatus'
 import { Modal } from '../components/Modal'
-import { SkeletonStatGrid, SkeletonCardGrid } from '../components/Skeleton'
+import { SkeletonStatGrid } from '../components/Skeleton'
 import { getCached, setCached, hasCached } from '../lib/cache'
 import type { Database } from '../lib/database.types'
 
@@ -52,7 +51,6 @@ export function Dashboard() {
   const [settings, setSettings] = useState<AppSettings | null>(cached?.settings ?? null)
   const [rateHistory, setRateHistory] = useState<RateChange[]>(cached?.rateHistory ?? [])
   const [loading, setLoading] = useState(!cached)
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
   const [reminderFor, setReminderFor] = useState<{ tenant: Tenant; balance: ReturnType<typeof computeTenantBalance> } | null>(null)
 
   const loadAll = useCallback(
@@ -112,8 +110,6 @@ export function Dashboard() {
           </div>
         </div>
         <SkeletonStatGrid count={5} />
-        <div className="section-title">Occupancy by apartment</div>
-        <SkeletonCardGrid count={4} />
       </>
     )
   }
@@ -141,11 +137,6 @@ export function Dashboard() {
   const arrears = balancePairs
     .filter((p) => p.balance.balance < 0)
     .sort((a, b) => a.balance.balance - b.balance.balance)
-
-  const occupancyByRoom: Record<string, number> = {}
-  for (const t of occupyingTenants) {
-    if (t.room_id) occupancyByRoom[t.room_id] = (occupancyByRoom[t.room_id] ?? 0) + 1
-  }
 
   return (
     <>
@@ -265,85 +256,6 @@ export function Dashboard() {
             </table>
           </div>
         </>
-      )}
-
-      <div className="section-title">Occupancy by apartment</div>
-      {apartments.length === 0 ? (
-        <div className="empty-state">
-          <h3>No apartments yet</h3>
-          <p>Set up apartments and rooms on the Units &amp; Rooms page to see occupancy here.</p>
-        </div>
-      ) : (
-        <div className="units-grid">
-          {apartments.map((apartment) => {
-            const apartmentRooms = rooms.filter((r) => r.apartment_id === apartment.id)
-            const cap = apartmentRooms.reduce((s, r) => s + effectiveCapacity(r), 0)
-            const occ = apartmentRooms.reduce((s, r) => s + (occupancyByRoom[r.id] ?? 0), 0)
-            return (
-              <div className="unit-card" key={apartment.id}>
-                <div className="unit-card-head">
-                  <h4>{apartment.name}</h4>
-                  <span className="unit-occ">
-                    {occ}/{cap} pax
-                  </span>
-                </div>
-                <div className="room-list">
-                  {apartmentRooms.map((room) => {
-                    const effCap = effectiveCapacity(room)
-                    const roomOcc = occupancyByRoom[room.id] ?? 0
-                    const dots = Array.from({ length: effCap }, (_, i) => i < roomOcc)
-                    return (
-                      <div
-                        className="room-row"
-                        key={room.id}
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => setSelectedRoom(room)}
-                      >
-                        <span className="room-id">{room.label}</span>
-                        <div className="bed-dots">
-                          {dots.map((filled, i) => (
-                            <span key={i} className={`dot ${filled ? 'filled' : 'empty'}`} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {apartmentRooms.length === 0 && <div className="hint">No rooms yet.</div>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {selectedRoom && (
-        <Modal title={selectedRoom.label} onClose={() => setSelectedRoom(null)}>
-          <div className="status-legend">
-            {(Object.keys(TENANT_STATUS_LABEL) as (keyof typeof TENANT_STATUS_LABEL)[])
-              .filter((s) => s !== 'inactive')
-              .map((status) => (
-                <span className="legend-item" key={status}>
-                  <span className={`badge ${TENANT_STATUS_BADGE[status]}`}>{TENANT_STATUS_LABEL[status]}</span>
-                </span>
-              ))}
-          </div>
-          {tenants.filter((t) => t.room_id === selectedRoom.id && occupiesBed(t.status)).length === 0 ? (
-            <div className="hint">No tenants currently assigned to this room.</div>
-          ) : (
-            <div className="room-tenant-list">
-              {tenants
-                .filter((t) => t.room_id === selectedRoom.id && occupiesBed(t.status))
-                .map((t) => (
-                  <div className="room-tenant-row" key={t.id}>
-                    <span>
-                      {t.first_name} {t.last_name}
-                    </span>
-                    <span className={`badge ${TENANT_STATUS_BADGE[t.status]}`}>{TENANT_STATUS_LABEL[t.status]}</span>
-                  </div>
-                ))}
-            </div>
-          )}
-        </Modal>
       )}
 
       {reminderFor && (
