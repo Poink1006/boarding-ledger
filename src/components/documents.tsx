@@ -12,6 +12,11 @@ export function formatReceiptNo(n: number | null) {
   return n == null ? '—' : `OR-${String(n).padStart(4, '0')}`
 }
 
+// currency for printed documents: always two decimals, business-statement style
+function docMoney(n: number) {
+  return '₱' + Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 function DocHeader({ settings, right }: { settings: AppSettings | null; right: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -149,122 +154,186 @@ export function StatementDoc({
   const isUtility = type === 'utility'
   const charged = isUtility ? balance.utilityDue : balance.rentDue
   const paid = isUtility ? balance.utilityPaid : balance.rentPaid
-  const bal = isUtility ? balance.utilityBalance : balance.rentBalance
-  const totalDue = bal < 0 ? -bal : 0
-  const typePayments = payments
+  const amountDue = Math.max(0, charged - paid)
+  const credit = Math.max(0, paid - charged)
+
+  // one chronological ledger of charges and payments with a running balance —
+  // the standard shape of a business statement of account
+  type LedgerRow = { date: string; desc: string; charge: number; payment: number; ref: string }
+  const raw: LedgerRow[] = []
+  if (isUtility) {
+    balance.utilityCharges.forEach((c) =>
+      raw.push({
+        date: c.month,
+        desc: `${c.type === 'electricity' ? 'Electricity' : 'Water'} — ${fmtMonth(c.month)}`,
+        charge: c.amount,
+        payment: 0,
+        ref: '',
+      }),
+    )
+  } else {
+    balance.cycles.forEach((c) =>
+      raw.push({ date: c.anchorDate, desc: `Rent — ${fmtMonth(c.anchorDate)}`, charge: c.rate, payment: 0, ref: '' }),
+    )
+  }
+  payments
     .filter((p) => p.payment_type === type)
-    .sort((a, b) => (a.date_paid < b.date_paid ? 1 : -1))
+    .forEach((p) =>
+      raw.push({
+        date: p.date_paid,
+        desc: p.notes ? `Payment received — ${p.notes}` : 'Payment received',
+        charge: 0,
+        payment: Number(p.amount || 0),
+        ref: formatReceiptNo(p.receipt_no),
+      }),
+    )
+  // oldest first; on the same date, a charge is listed before its payment
+  raw.sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1
+    return (a.payment > 0 ? 1 : 0) - (b.payment > 0 ? 1 : 0)
+  })
+  let running = 0
+  const rows = raw.map((r) => {
+    running += r.charge - r.payment
+    return { ...r, balance: running }
+  })
+
+  const stmtNo = `SOA-${tenant.tenant_number}-${todayStr().replace(/-/g, '').slice(2)}`
+  const ink = '#1a1a1a'
+  const muted = '#666'
 
   return (
     <>
-      <DocHeader
-        settings={settings}
-        right={
-          <>
-            <div className="doc-title">Statement of Account · {isUtility ? 'Utilities' : 'Rent'}</div>
-            <div className="doc-muted" style={{ fontSize: 12, marginTop: 2 }}>as of {fmtDate(todayStr())}</div>
-          </>
-        }
-      />
-      <div className="doc-muted" style={{ fontSize: 12, marginTop: 4 }}>
-        {tenant.first_name} {tenant.last_name} · {tenant.tenant_number} · {room?.label ?? '—'}
+      {/* header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1>{settings?.business_name || 'Victoria Residence'}</h1>
+          {settings?.business_address && <div className="doc-muted" style={{ fontSize: 12 }}>{settings.business_address}</div>}
+          {settings?.business_contact && <div className="doc-muted" style={{ fontSize: 12 }}>{settings.business_contact}</div>}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, color: ink, lineHeight: 1 }}>
+            STATEMENT
+          </div>
+          <div className="doc-muted" style={{ fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            of account · {isUtility ? 'Utilities' : 'Rent'}
+          </div>
+          <div style={{ fontSize: 12, marginTop: 10, color: muted }}>
+            <div>
+              Statement no. <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: ink }}>{stmtNo}</span>
+            </div>
+            <div>Date: {fmtDate(todayStr())}</div>
+          </div>
+        </div>
       </div>
       <hr className="doc-hr" />
 
-      {isUtility ? (
-        balance.utilityCharges.length === 0 ? (
-          <div className="doc-muted" style={{ fontSize: 13, marginBottom: 10 }}>No utility charges yet.</div>
-        ) : (
-          <table className="doc-table" style={{ marginBottom: 8 }}>
-            <thead>
-              <tr>
-                <th>Month</th>
-                <th>Utility</th>
-                <th style={{ textAlign: 'right' }}>Charge</th>
-                <th style={{ textAlign: 'right' }}>Paid</th>
-                <th style={{ textAlign: 'right' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {balance.utilityCharges.map((c, i) => (
-                <tr key={i}>
-                  <td>{fmtMonth(c.month)}</td>
-                  <td>{c.type === 'electricity' ? 'Electricity' : 'Water'}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.amount)}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(c.appliedAmount)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {c.status === 'paid' ? 'Paid' : c.status === 'partial' ? 'Partial' : 'Unpaid'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )
-      ) : balance.cycles.length === 0 ? (
-        <div className="doc-muted" style={{ fontSize: 13, marginBottom: 10 }}>No rent billing cycles yet.</div>
-      ) : (
-        <table className="doc-table" style={{ marginBottom: 8 }}>
-          <thead>
-            <tr>
-              <th>Month starting</th>
-              <th style={{ textAlign: 'right' }}>Charge</th>
-              <th style={{ textAlign: 'right' }}>Paid</th>
-              <th style={{ textAlign: 'right' }}>Status</th>
-            </tr>
-          </thead>
+      {/* bill to + account summary */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, alignItems: 'flex-start' }}>
+        <div style={{ fontSize: 13 }}>
+          <div className="doc-title" style={{ marginBottom: 4 }}>Bill to</div>
+          <div style={{ fontWeight: 600, color: ink }}>
+            {tenant.first_name} {tenant.last_name}
+          </div>
+          <div style={{ color: muted }}>
+            Tenant <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{tenant.tenant_number}</span> · Room{' '}
+            {room?.label ?? '—'}
+          </div>
+          {tenant.contact_number && <div style={{ color: muted }}>{tenant.contact_number}</div>}
+        </div>
+        <table style={{ fontSize: 13, minWidth: 240, borderCollapse: 'collapse' }}>
           <tbody>
-            {balance.cycles.map((c) => (
-              <tr key={c.index}>
-                <td>{fmtDate(c.anchorDate)}</td>
-                <td style={{ textAlign: 'right' }}>{fmtMoney(c.rate)}</td>
-                <td style={{ textAlign: 'right' }}>{fmtMoney(c.appliedAmount)}</td>
-                <td style={{ textAlign: 'right' }}>
-                  {c.status === 'paid' ? 'Paid' : c.status === 'partial' ? 'Partial' : 'Unpaid'}
-                </td>
-              </tr>
-            ))}
+            <tr>
+              <td style={{ color: muted, padding: '3px 0' }}>Total charges</td>
+              <td style={{ textAlign: 'right', padding: '3px 0' }}>{docMoney(charged)}</td>
+            </tr>
+            <tr>
+              <td style={{ color: muted, padding: '3px 0' }}>Total payments</td>
+              <td style={{ textAlign: 'right', padding: '3px 0' }}>− {docMoney(paid)}</td>
+            </tr>
+            <tr>
+              <td style={{ fontWeight: 600, color: ink, padding: '6px 0 0', borderTop: '1px solid #e2e2e2' }}>
+                Balance due
+              </td>
+              <td style={{ fontWeight: 600, color: ink, textAlign: 'right', padding: '6px 0 0', borderTop: '1px solid #e2e2e2' }}>
+                {docMoney(amountDue)}
+              </td>
+            </tr>
           </tbody>
         </table>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, fontSize: 13 }}>
-        <span className="doc-muted">Charged {fmtMoney(charged)}</span>
-        <span className="doc-muted">Paid {fmtMoney(paid)}</span>
-        <span style={{ fontWeight: 600 }}>{balanceLabel(bal)}</span>
       </div>
 
-      {typePayments.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, letterSpacing: '0.05em', color: '#666', margin: '16px 0 4px' }}>
-            PAYMENTS RECEIVED
-          </div>
-          <table className="doc-table">
-            <thead>
-              <tr>
-                <th>Receipt</th>
-                <th>Date</th>
-                <th style={{ textAlign: 'right' }}>Amount</th>
+      {/* ledger */}
+      <div className="doc-title" style={{ margin: '18px 0 6px' }}>Account activity</div>
+      <table className="doc-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th style={{ textAlign: 'right' }}>Charges</th>
+            <th style={{ textAlign: 'right' }}>Payments</th>
+            <th style={{ textAlign: 'right' }}>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="doc-muted" style={{ padding: '10px 0' }}>
+                No activity on this account yet.
+              </td>
+            </tr>
+          ) : (
+            rows.map((r, i) => (
+              <tr key={i}>
+                <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.date)}</td>
+                <td>
+                  {r.desc}
+                  {r.ref && r.ref !== '—' && (
+                    <span className="doc-muted" style={{ fontFamily: "'IBM Plex Mono', monospace", marginLeft: 6, fontSize: 11 }}>
+                      {r.ref}
+                    </span>
+                  )}
+                </td>
+                <td style={{ textAlign: 'right' }}>{r.charge ? docMoney(r.charge) : ''}</td>
+                <td style={{ textAlign: 'right' }}>{r.payment ? docMoney(r.payment) : ''}</td>
+                <td style={{ textAlign: 'right', fontFamily: "'IBM Plex Mono', monospace" }}>{docMoney(r.balance)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {typePayments.map((p) => (
-                <tr key={p.id}>
-                  <td style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{formatReceiptNo(p.receipt_no)}</td>
-                  <td>{fmtDate(p.date_paid)}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtMoney(p.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))
+          )}
+        </tbody>
+      </table>
+
+      {/* amount due callout */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+        <div
+          style={{
+            minWidth: 260,
+            background: '#f7f4ec',
+            border: '1px solid #e6dcc4',
+            borderRadius: 8,
+            padding: '12px 16px',
+            textAlign: 'right',
+          }}
+        >
+          <div className="doc-title" style={{ marginBottom: 2 }}>Amount due</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: amountDue > 0 ? '#a32d2d' : '#0f6e56' }}>
+            {amountDue > 0 ? docMoney(amountDue) : 'PAID IN FULL'}
+          </div>
+          {credit > 0 && <div className="doc-muted" style={{ fontSize: 12 }}>Credit on account: {docMoney(credit)}</div>}
+        </div>
+      </div>
+
+      {/* payment instructions */}
+      {settings?.payment_instructions?.trim() && (
+        <>
+          <hr className="doc-hr" />
+          <div className="doc-title" style={{ marginBottom: 4 }}>How to pay</div>
+          <div style={{ fontSize: 12, color: ink, whiteSpace: 'pre-line' }}>{settings.payment_instructions.trim()}</div>
         </>
       )}
 
-      <hr className="doc-hr" />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <span style={{ fontWeight: 600 }}>Total {isUtility ? 'utility' : 'rent'} due</span>
-        <span style={{ fontSize: 20, fontWeight: 600, color: totalDue > 0 ? '#a32d2d' : '#0f6e56' }}>
-          {totalDue > 0 ? fmtMoney(totalDue) : 'Paid up'}
-        </span>
+      <div className="doc-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 20 }}>
+        Generated {fmtDate(todayStr())} · Thank you for staying with {settings?.business_name || 'Victoria Residence'}.
       </div>
     </>
   )
