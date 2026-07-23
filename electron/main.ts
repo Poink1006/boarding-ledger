@@ -20,7 +20,7 @@ function createWindow() {
     minHeight: 640,
     fullscreen: true,
     title: 'Victoria Residence',
-    backgroundColor: '#F5F1E8',
+    backgroundColor: '#ffffff',
     icon: path.join(process.env.VITE_PUBLIC!, 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
