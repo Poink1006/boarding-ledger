@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { toLoginEmail } from '../lib/username'
 import logo from '../assets/logo.png'
 
 export function Login() {
   const { session, loading, signIn } = useAuth()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -16,7 +17,8 @@ export function Login() {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
-    const { error } = await signIn(email, password)
+    // maps a username to its synthetic email; a typed email passes through
+    const { error } = await signIn(toLoginEmail(username), password)
     setSubmitting(false)
     if (error) setError(error)
   }
@@ -47,12 +49,14 @@ export function Login() {
         </div>
 
         <div className="form-group">
-          <label>Email</label>
+          <label>Username</label>
           <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             autoFocus
+            autoCapitalize="none"
+            autoCorrect="off"
             required
           />
         </div>

@@ -10,5 +10,5 @@
 // the check only becomes meaningful once 016 has been run.
 export const EXPECTED_MIGRATIONS = [
   '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012',
-  '013', '014', '015', '016', '017',
+  '013', '014', '015', '016', '017', '018',
 ] as const

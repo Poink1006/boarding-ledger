@@ -9,6 +9,7 @@ import { fmtMoney, fmtDate } from '../lib/format'
 import { getCached, setCached, hasCached } from '../lib/cache'
 import { SkeletonBlock, SkeletonTable } from '../components/Skeleton'
 import { exportAllData, daysSinceLastBackup, getLastBackupAt, BACKUP_STALE_DAYS } from '../lib/backup'
+import { toLoginEmail } from '../lib/username'
 import type { Database, UserRole } from '../lib/database.types'
 
 type AppSettings = Database['public']['Tables']['app_settings']['Row']
@@ -642,6 +643,7 @@ export function Settings() {
                 <thead>
                   <tr>
                     <th>Name</th>
+                    <th>Username</th>
                     <th>Role</th>
                     <th></th>
                   </tr>
@@ -652,6 +654,7 @@ export function Settings() {
                       <td className="name-cell">
                         {u.full_name || '—'} {u.id === profile?.id && <span className="sub-cell">(you)</span>}
                       </td>
+                      <td className="mono">{u.username || '—'}</td>
                       <td>
                         <span className={`badge ${u.role === 'admin' ? 'badge-active' : 'badge-pending'}`}>
                           {u.role === 'admin' ? 'Admin' : 'Staff'}
@@ -869,7 +872,7 @@ function BackupPanel({ exporting, onExport }: { exporting: boolean; onExport: ()
 function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const { showToast } = useToast()
   const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -878,8 +881,9 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
       showToast('Enter the person’s name.')
       return
     }
-    if (!email.trim()) {
-      showToast('Enter an email.')
+    const uname = username.trim().toLowerCase()
+    if (!/^[a-z0-9._-]{3,}$/.test(uname)) {
+      showToast('Username must be 3+ characters: letters, numbers, dots, dashes, underscores.')
       return
     }
     if (password.length < 6) {
@@ -890,22 +894,22 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     // Sign the new account up through a SEPARATE, non-persisting client so it
     // doesn't overwrite the admin's own session (persistSession:false keeps it
     // off localStorage). Only the public anon key is used — no service_role.
-    // The handle_new_user DB trigger creates their profile (role 'user') from
-    // the full_name we pass in metadata.
+    // The username maps to a synthetic email; the handle_new_user DB trigger
+    // creates their profile (role 'user') with the full_name + username.
     const tempClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     const { error } = await tempClient.auth.signUp({
-      email: email.trim(),
+      email: toLoginEmail(uname),
       password,
-      options: { data: { full_name: fullName.trim() } },
+      options: { data: { full_name: fullName.trim(), username: uname } },
     })
     setSaving(false)
     if (error) {
-      showToast(error.message)
+      showToast(/already registered/i.test(error.message) ? 'That username is already taken.' : error.message)
       return
     }
-    showToast(`Account created for ${fullName.trim()}.`)
+    showToast(`Account created for ${fullName.trim()} (username: ${uname}).`)
     onSaved()
   }
 
@@ -929,16 +933,21 @@ function AddUserModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Juan Dela Cruz" autoFocus />
       </div>
       <div className="form-group">
-        <label>Email (used to sign in)</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="juan@email.com" />
+        <label>Username (used to sign in)</label>
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="e.g. juan"
+          autoCapitalize="none"
+          autoCorrect="off"
+        />
       </div>
       <div className="form-group">
         <label>Temporary password</label>
         <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="at least 6 characters" />
         <div className="hint">
-          Share this with the new user so they can sign in, then they can be promoted to admin here if needed. New
-          accounts start as staff. If your Supabase project requires email confirmation, they'll need to confirm via
-          the emailed link before their first sign-in.
+          Give the username and password to the new user so they can sign in. New accounts start as staff — promote to
+          admin from the list if needed.
         </div>
       </div>
     </Modal>

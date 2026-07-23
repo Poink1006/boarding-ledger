@@ -17,18 +17,21 @@ export interface Database {
         Row: {
           id: string
           full_name: string
+          username: string | null
           role: UserRole
           created_at: string
         }
         Insert: {
           id: string
           full_name?: string
+          username?: string | null
           role?: UserRole
           created_at?: string
         }
         Update: {
           id?: string
           full_name?: string
+          username?: string | null
           role?: UserRole
           created_at?: string
         }
