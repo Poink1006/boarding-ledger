@@ -265,7 +265,7 @@ export function TenantProfile() {
       )}
 
       {receiptFor && (
-        <PrintModal onClose={() => setReceiptFor(null)}>
+        <PrintModal onClose={() => setReceiptFor(null)} pdfName={`receipt-${tenant.tenant_number}.pdf`}>
           <ReceiptDoc
             settings={settings}
             tenant={tenant}
@@ -278,7 +278,7 @@ export function TenantProfile() {
       )}
 
       {statementType && (
-        <PrintModal onClose={() => setStatementType(null)}>
+        <PrintModal onClose={() => setStatementType(null)} pdfName={`${statementType}-statement-${tenant.tenant_number}.pdf`}>
           <StatementDoc
             settings={settings}
             tenant={tenant}

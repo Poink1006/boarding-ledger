@@ -885,13 +885,17 @@ input[type='number']::-webkit-inner-spin-button {
 .doc-print-toolbar .btn-ghost:hover {
   background: var(--paper-alt);
 }
+/* brighter, higher-contrast gold so the action buttons clearly pop on the
+   dark modal backdrop instead of reading as a muted/dark surface */
 .doc-print-toolbar .btn-primary {
-  background: var(--brass);
-  color: var(--ink);
-  border: 1px solid var(--brass);
+  background: #dcae42;
+  color: #2a2000;
+  border: 1px solid #dcae42;
+  font-weight: 600;
 }
 .doc-print-toolbar .btn-primary:hover {
-  opacity: 0.9;
+  background: #e7bd55;
+  border-color: #e7bd55;
 }
 .doc-sheet {
   background: #ffffff;

@@ -401,7 +401,10 @@ export function Payments() {
       )}
 
       {receiptModal && (
-        <PrintModal onClose={() => setReceiptModal(null)}>
+        <PrintModal
+          onClose={() => setReceiptModal(null)}
+          pdfName={`receipt-${receiptModal.tenant.tenant_number}.pdf`}
+        >
           <ReceiptDoc
             settings={settings}
             tenant={receiptModal.tenant}
@@ -414,7 +417,10 @@ export function Payments() {
       )}
 
       {statementModal && (
-        <PrintModal onClose={() => setStatementModal(null)}>
+        <PrintModal
+          onClose={() => setStatementModal(null)}
+          pdfName={`${statementModal.type}-statement-${statementModal.tenant.tenant_number}.pdf`}
+        >
           <StatementDoc
             settings={settings}
             tenant={statementModal.tenant}

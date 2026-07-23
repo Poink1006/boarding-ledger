@@ -18,4 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update:downloaded', handler)
   },
   restartToUpdate: () => ipcRenderer.send('update:restart'),
+  // save the current document view as a PDF via a native Save dialog; returns
+  // { saved } so the renderer can fall back to window.print() when unavailable
+  savePDF: (filename?: string): Promise<{ saved: boolean; filePath?: string }> =>
+    ipcRenderer.invoke('doc:save-pdf', filename),
 })

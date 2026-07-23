@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 process.env.DIST = path.join(__dirname, '../dist')
@@ -43,6 +44,22 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
+
+// Save the current document (a receipt/statement/report) as a real PDF. The
+// @media print CSS isolates .doc-sheet, and printToPDF renders in print mode,
+// so the PDF contains just the document — no app chrome.
+ipcMain.handle('doc:save-pdf', async (_e, filename?: string) => {
+  if (!win) return { saved: false }
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Save PDF',
+    defaultPath: filename || 'document.pdf',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (canceled || !filePath) return { saved: false }
+  const data = await win.webContents.printToPDF({ printBackground: true })
+  await writeFile(filePath, data)
+  return { saved: true, filePath }
 })
 
 function setupAutoUpdater() {

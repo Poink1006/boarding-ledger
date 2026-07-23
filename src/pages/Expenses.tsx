@@ -305,7 +305,7 @@ export function Expenses() {
       )}
 
       {reportOpen && (
-        <PrintModal onClose={() => setReportOpen(false)}>
+        <PrintModal onClose={() => setReportOpen(false)} pdfName={`monthly-summary-${month}.pdf`}>
           <MonthlySummaryDoc
             settings={settings}
             monthLabel={fmtMonth(monthInputToDate(month))}
